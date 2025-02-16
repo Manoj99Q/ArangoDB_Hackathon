@@ -1,0 +1,38 @@
+<html>
+  <head>
+    <!-- Load D3.js from CDN -->
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <script type="text/javascript">
+      // Attach the visualization function to the global object
+      globalThis.createBarChart = function() {
+        // Sample data for the bar chart
+        var data = [30, 86, 168, 281, 303, 365];
+        var width = 500;
+        var height = 300;
+
+        // Clear any previous SVG element if present
+        d3.select("#chart").select("svg").remove();
+
+        // Create an SVG element within the #chart div
+        var svg = d3.select("#chart")
+                    .append("svg")
+                    .attr("width", width)
+                    .attr("height", height);
+
+        // Create a bar for each data point
+        svg.selectAll("rect")
+           .data(data)
+           .enter().append("rect")
+           .attr("width", 40)
+           .attr("height", function(d) { return d; })
+           .attr("x", function(d, i) { return i * 45; })
+           .attr("y", function(d) { return height - d; })
+           .attr("fill", "steelblue");
+      }
+    </script>
+  </head>
+  <body onload="createBarChart()">
+    <h1>D3.js Bar Chart</h1>
+    <div id="chart"></div>
+  </body>
+</html>
