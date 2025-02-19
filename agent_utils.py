@@ -25,12 +25,12 @@ class GraphAgent:
         """
         self.arango_graph = arango_graph
         self.networkx_graph = networkx_graph
-        # self.llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
-        self.llm = ChatAnthropic(
-            model="claude-3-5-sonnet-20241022",
-            temperature=0,
-            anthropic_api_key=os.getenv('ANTHROPIC_API_KEY')
-        )
+        self.llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
+        # self.llm = ChatAnthropic(
+        #     model="claude-3-5-sonnet-20241022",
+        #     temperature=0,
+        #     anthropic_api_key=os.getenv('ANTHROPIC_API_KEY')
+        # )
         self.tools = self._create_tools()
         
         # Keep agent creation modular for easy replacement
@@ -68,10 +68,13 @@ class GraphAgent:
             graph=self.arango_graph,
             verbose=True,
             allow_dangerous_requests=True,
-            system_message=system_message
+            system_message=system_message,
+            return_aql_result=True
         )
         
         result = chain.invoke(query)
+        print("Arrango Chain Result:")
+        print(result)
         return str(result["result"])
 
     def text_to_nx_algorithm_to_text(self, query: str):
@@ -175,4 +178,6 @@ class GraphAgent:
         final_state = self.agent.invoke({
             "messages": [{"role": "user", "content": query}]
         })
+        for i in final_state["messages"]:
+            print(i)
         return final_state["messages"][-1].content
