@@ -16,6 +16,7 @@ import os
 from langgraph.graph import StateGraph, END
 from IPython.display import Image, display
 from langgraph.prebuilt import tools_condition
+from pprint import pprint
 # Load environment variables
 load_dotenv()
 
@@ -60,45 +61,24 @@ class GraphAgent:
         return create_react_agent(self.llm, self.tools)
 
     def text_to_aql_to_text(self, query: str):
-        """Process natural language to AQL query and format results"""
-        try:
-            aql_query = self.llm.invoke(f"""
-            Convert this natural language query to AQL:
-            '{query}'
-            
-            The graph has these collections: {self.arango_graph.schema}
-            Return ONLY the AQL query without explanations.
-            """).content.strip()
+        """This tool is available to invoke the
+        ArangoGraphQAChain object, which enables you to
+        translate a Natural Language Query into AQL, execute
+        the query, and translate the result back into Natural Language.
+        """
 
-            print("Query Received for AQL translation:")
-            print(query)
-            print("-"*10)
-            print("Generated AQL:\n", aql_query)
-            
-            # Execute query
-            result = self.arango_graph.query(aql_query)
-            
-            # Enhance results with game names
-            enhanced_results = []
-            for item in result:
-                if 'game_id' in item:
-                    game_doc = self.arango_graph.get_document(item['game_id'])
-                    item['game_name'] = game_doc.get('GameName', item['game_id'])
-                enhanced_results.append(item)
-            
-            # Format numbers and create response
-            formatted = []
-            for i, item in enumerate(enhanced_results):
-                hours = f"{item['total_hours']:,.1f}".rstrip('.0')
-                name = item.get('game_name', item.get('game_id', 'Unknown'))
-                formatted.append(f"{i+1}. {name}: {hours} hours")
-            
-            final_response = "Results:\n" + "\n".join(formatted)
-            return final_response
+        
 
-        except Exception as e:
-            print(f"Query Error: {e}")
-            return f"Error processing query: {str(e)}"
+        chain = ArangoGraphQAChain.from_llm(
+            llm=self.llm,
+            graph=self.arango_graph,
+            verbose=True,
+            allow_dangerous_requests=True
+        )
+        
+        result = chain.invoke(query)
+
+        return str(result["result"])
 
     def text_to_nx_algorithm_to_text(self, query: str):
         """This tool executes NetworkX algorithms based on natural language queries."""
@@ -271,6 +251,9 @@ class GraphAgent:
         # messages = state.get("messages", [])
         # print("Messages:")
         # ... etc ...
+        print("\nProcessing Agent State:")
+        pprint(state, indent=2, width=80)
+
         
         plan_prompt = """SYSTEM: You are a Graph Analysis Planner. Follow these steps:
                 1. Analyze the user's query
@@ -335,6 +318,25 @@ class GraphAgent:
         # Use invoke() instead of stream() to get final state directly
         final_state = self.agent.invoke(initial_state)
         
+        # Print debug log of final state
+        print("\nDebug - Final State:")
+        print(f"Number of messages: {len(final_state['messages'])}")
+        for i, msg in enumerate(final_state['messages']):
+            print(f"\nMessage {i+1}:")
+            print(f"Type: {type(msg).__name__}")
+            print(f"Content: {msg.content}")
+            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                print("Tool Calls:")
+                for tc in msg.tool_calls:
+                    # Handle both dict and function object formats
+                    if isinstance(tc, dict):
+                        tool_name = tc.get('name', 'Unknown')
+                        tool_args = tc.get('arguments', {})
+                    else:
+                        tool_name = tc.function.name
+                        tool_args = tc.function.arguments
+                    print(f"- Tool: {tool_name}")
+                    print(f"  Arguments: {tool_args}")
         # Only print the final message content
         print("Final Answer:")
         print(final_state["messages"][-1].content)
