@@ -1,14 +1,15 @@
-from typing import List, TypedDict,Annotated
+from typing import List, TypedDict,Annotated,Any
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from langchain.tools import Tool
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool,tool
+from langchain_core.tools.base import InjectedToolCallId
 from langgraph.prebuilt import create_react_agent, ToolNode
+from langgraph.types import Command
 from langchain_core.prompts import PromptTemplate, ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.chains.graph_qa.arangodb import ArangoGraphQAChain
 from langgraph.graph.message import AnyMessage, add_messages
 from langchain_core.messages import BaseMessage, ToolMessage, HumanMessage, AIMessage
-from langchain_core.runnables import RunnableLambda
 import networkx as nx
 import re
 from dotenv import load_dotenv
@@ -20,12 +21,20 @@ from pprint import pprint
 # Load environment variables
 load_dotenv()
 
+def add_data(old_data: list[dict[str, Any]], new_data: list[dict[str, Any]] | dict[str, Any]) -> list[dict[str, Any]]:
+    """Reducer to append new data to existing data list"""
+    if old_data is None:
+        old_data = []
+    if isinstance(new_data, dict):
+        return [*old_data, new_data]
+    return [*old_data, *new_data]
+
 # Add State definition at the top with other imports
 class GraphState(TypedDict):
     """Represents the state of our graph workflow."""
     messages: Annotated[list[AnyMessage], add_messages]
     user_query: str  # To track the current query being processed
-    data: dict
+    data: Annotated[list[dict[str, Any]], add_data]
     RAG_reply: str
     
 
@@ -46,7 +55,7 @@ class GraphAgent:
         #     temperature=0,
         #     anthropic_api_key=os.getenv('ANTHROPIC_API_KEY')
         # )
-        self.tools = self._create_tools()
+
         
         # Create separate tool sets
         self.RAG_tools = self._create_RAG_tools()
@@ -58,7 +67,7 @@ class GraphAgent:
         display(Image(self.agent.get_graph(xray=True).draw_mermaid_png()))
 
 
-    def text_to_aql_to_text(self, query: str):
+    def text_to_aql_to_text(self, query: str,tool_call_id: str):
         """This tool is available to invoke the
         ArangoGraphQAChain object, which enables you to
         translate a Natural Language Query into AQL, execute
@@ -71,14 +80,26 @@ class GraphAgent:
             llm=self.llm,
             graph=self.arango_graph,
             verbose=True,
-            allow_dangerous_requests=True
+            allow_dangerous_requests=True,
+            return_aql_query=True,
+            return_aql_result=True
+
         )
         
         result = chain.invoke(query)
 
-        return str(result["result"])
+        print("print AQL tool result")
+        print(result)
+        # return str(result["result"])
 
-    def text_to_nx_algorithm_to_text(self, query: str):
+        return Command(
+            update={
+                "data": {"aql_result": result["aql_result"],"description": result["result"]},
+                "messages": [ToolMessage(str(result["result"]), tool_call_id=tool_call_id)]
+            }
+        )
+
+    def text_to_nx_algorithm_to_text(self, query: str,tool_call_id: str):
         """This tool executes NetworkX algorithms based on natural language queries."""
         if self.networkx_graph is None:
             return "Error: NetworkX graph is not initialized"
@@ -99,7 +120,9 @@ class GraphAgent:
         Only assume that networkx is installed, and other base python dependencies.
         Always set the last variable as `FINAL_RESULT`, which represents the answer to the original query.
         Only provide python code that I can directly execute via `exec()`. Do not provide any instructions.
-        Make sure that `FINAL_RESULT` stores a short & concise answer.
+        Make sure that `FINAL_RESULT` stores all the information for example a list of nodes, edges, etc.
+        Make sure that `FINAL_RESULT` contains not just the ID but the actual node/edge object with all the properties.
+
 
         Your code:
         """).content
@@ -138,62 +161,46 @@ class GraphAgent:
         Based on my original Query and FINAL_RESULT, generate a short and concise response.
         """).content
 
-        return response
+        # return response
+    
+        return Command(
+            update={
+                "data": FINAL_RESULT,
+                "messages": [ToolMessage(response,tool_call_id=tool_call_id)]
+            }
+        )
 
-    def _create_tools(self) -> List[BaseTool]:
-        """Create the list of tools available to the agent."""
-        return [
-            Tool(
-                name="AQL_Query",
-                func=self.text_to_aql_to_text,
-                description="""Use natural language to query the graph database.
-
-                Examples of good queries:
-                - "How many users are there?"
-                - "What are the top 5 most played games?"
-                - "Find users who played Dota 2"
-
-                Do not write AQL queries - this tool translates your question into database queries.
-
-                Best for:
-                - Counting entities
-                - Finding relationships
-                - Data retrieval
-                - Aggregating information"""
-            ),
-            Tool(
-                name="NetworkX_Analysis",
-                func=self.text_to_nx_algorithm_to_text,
-                description="""Analyze graph structure and patterns using NetworkX algorithms.
-
-                Best for:
-                - Finding shortest paths
-                - Calculating centrality
-                - Detecting communities
-                - Complex network analysis
-
-                Use natural language to describe what you want to analyze."""
-            )
-        ]
+   
 
     def _create_RAG_tools(self):
         """Tools for data processing stage"""
-        return [
-            Tool.from_function(
-                func=self.text_to_aql_to_text,
-                name="query_processor",
-                description="Process natural language queries into database queries"
-            ),
-            Tool.from_function(
-                func=self.text_to_nx_algorithm_to_text,
-                name="network_analyzer",
-                description="""Analyze graph structure and patterns using NetworkX algorithms.
+        @tool
+        def AQL_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: str):
+            """This tool is available to invoke the
+            ArangoGraphQAChain object, which enables you to
+            translate a Natural Language Query into AQL, execute
+            the query, and translate the result back into Natural Language.
+            """
+            try:
+                return self.text_to_aql_to_text(query,tool_call_id=tool_call_id)
+            except Exception as e:
+                return f"Error: {e}"
+            
+        @tool
+        def NX_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: str):
+            """Analyze graph structure and patterns using NetworkX algorithms.
                 Best for:
                 - Finding shortest paths
                 - Calculating centrality
                 - Detecting communities
                 - Complex network analysis"""
-            )
+            try:
+                return self.text_to_nx_algorithm_to_text(query,tool_call_id=tool_call_id)
+            except Exception as e:
+                return f"Error: {e}"
+        return [
+            AQL_QueryWrapper,
+            NX_QueryWrapper
         ]
 
     def _create_visualization_tools(self):
@@ -343,24 +350,24 @@ class GraphAgent:
         final_state = self.agent.invoke(initial_state)
         
         # Print debug log of final state
-        print("\nDebug - Final State:")
-        print(f"Number of messages: {len(final_state['messages'])}")
-        for i, msg in enumerate(final_state['messages']):
-            print(f"\nMessage {i+1}:")
-            print(f"Type: {type(msg).__name__}")
-            print(f"Content: {msg.content}")
-            if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                print("Tool Calls:")
-                for tc in msg.tool_calls:
-                    # Handle both dict and function object formats
-                    if isinstance(tc, dict):
-                        tool_name = tc.get('name', 'Unknown')
-                        tool_args = tc.get('arguments', {})
-                    else:
-                        tool_name = tc.function.name
-                        tool_args = tc.function.arguments
-                    print(f"- Tool: {tool_name}")
-                    print(f"  Arguments: {tool_args}")
+        # print("\nDebug - Final State:")
+        # print(f"Number of messages: {len(final_state['messages'])}")
+        # for i, msg in enumerate(final_state['messages']):
+        #     print(f"\nMessage {i+1}:")
+        #     print(f"Type: {type(msg).__name__}")
+        #     print(f"Content: {msg.content}")
+        #     if hasattr(msg, 'tool_calls') and msg.tool_calls:
+        #         print("Tool Calls:")
+        #         for tc in msg.tool_calls:
+        #             # Handle both dict and function object formats
+        #             if isinstance(tc, dict):
+        #                 tool_name = tc.get('name', 'Unknown')
+        #                 tool_args = tc.get('arguments', {})
+        #             else:
+        #                 tool_name = tc.function.name
+        #                 tool_args = tc.function.arguments
+        #             print(f"- Tool: {tool_name}")
+        #             print(f"  Arguments: {tool_args}")
         # Only print the final message content
         print("Final Answer:")
         print(final_state["messages"][-1].content)
