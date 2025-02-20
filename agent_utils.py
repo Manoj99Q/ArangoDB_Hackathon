@@ -25,7 +25,8 @@ class GraphState(TypedDict):
     """Represents the state of our graph workflow."""
     messages: Annotated[list[AnyMessage], add_messages]
     user_query: str  # To track the current query being processed
-    # data: Annotated[dict, add_messages]  # Changed from tool_merger to add_messages
+    data: dict
+    RAG_reply: str
     
 
 class GraphAgent:
@@ -48,7 +49,7 @@ class GraphAgent:
         self.tools = self._create_tools()
         
         # Create separate tool sets
-        self.processing_tools = self._create_processing_tools()
+        self.RAG_tools = self._create_RAG_tools()
         self.visualization_tools = self._create_visualization_tools()
         
         # Build the graph
@@ -56,9 +57,6 @@ class GraphAgent:
 
         display(Image(self.agent.get_graph(xray=True).draw_mermaid_png()))
 
-    def _create_agent(self):
-        """Create the agent - easy to modify if we switch to custom LangGraph"""
-        return create_react_agent(self.llm, self.tools)
 
     def text_to_aql_to_text(self, query: str):
         """This tool is available to invoke the
@@ -178,7 +176,7 @@ class GraphAgent:
             )
         ]
 
-    def _create_processing_tools(self):
+    def _create_RAG_tools(self):
         """Tools for data processing stage"""
         return [
             Tool.from_function(
@@ -209,31 +207,50 @@ class GraphAgent:
             # Add other visualization tools as needed
         ]
 
+    def should_continue_after_RAG(self,state: GraphState):
+        messages = state["messages"]
+        last_message = messages[-1]
+        if last_message.tool_calls:
+            return "RAG Tools"
+        else:
+            return "Visualizer"
+        
+    def should_continue_after_Vis(self, state: GraphState):
+        messages = state["messages"]
+        last_message = messages[-1]
+        # First check if it's an AIMessage
+        if isinstance(last_message, AIMessage):
+            if last_message.tool_calls:
+                return "Vis Tools"
+        return END
+
     def _create_workflow(self):
         # Define the graph structure
         builder = StateGraph(GraphState)
         
         # Add nodes
-        builder.add_node("processing_agent", self.processing_agent)
-        builder.add_node("tools", ToolNode(self.processing_tools))
-        # builder.add_node("visualization_agent", self.visualization_agent)
-        # builder.add_node("visualization_tools", ToolNode(self.visualization_tools))
-        builder.add_edge("tools","processing_agent")
-        # builder.add_edge("visualization_tools","visualization_agent")
+        builder.add_node("RAG", self.RAG)
+        builder.add_node("RAG Tools", ToolNode(self.RAG_tools))
+        builder.add_node("Visualizer", self.Visualizer)
+        builder.add_node("Vis Tools", ToolNode(self.visualization_tools))
+        builder.add_edge("RAG Tools","RAG")
+        builder.add_edge("Vis Tools","Visualizer")
         # Set up edges
-        builder.set_entry_point("processing_agent")
+        builder.set_entry_point("RAG")
         
         # Update conditional edges to handle message objects properly
         builder.add_conditional_edges(
-            "processing_agent",
-            tools_condition
+            "RAG",
+            self.should_continue_after_RAG,
+            ["RAG Tools", "Visualizer"]
+
         )
         
-        # builder.add_conditional_edges(
-        #     "visualization_agent",
-        #     lambda state: "visualization_tools" if self._has_tool_calls(state) else END,
-        #     {"visualization_tools": "visualization_tools", END: END}
-        # )
+        builder.add_conditional_edges(
+            "Visualizer",
+            self.should_continue_after_Vis  ,
+            ["Vis Tools", END]
+        )
 
         return builder.compile()
 
@@ -244,13 +261,9 @@ class GraphAgent:
         last_msg = state["messages"][-1]
         return hasattr(last_msg, 'tool_calls') and bool(last_msg.tool_calls)
 
-    def processing_agent(self, state: GraphState):
-        """Agent for data processing phase"""
-        # Remove these print statements
-        # print("State at processing_agent call:")
-        # messages = state.get("messages", [])
-        # print("Messages:")
-        # ... etc ...
+    def RAG(self, state: GraphState):
+        """RAG Step to generate a plan for the query and execute it to get the results"""
+
         print("\nProcessing Agent State:")
         pprint(state, indent=2, width=80)
 
@@ -266,8 +279,11 @@ class GraphAgent:
                 → Use one tool per step
                 → Reference previous results where needed
 
-                Current Query: {user_query}
+                Graph Schema:
+                {schema}
 
+                Current Query: {user_query}
+                
                 YOUR PLAN:
                 1."""
 
@@ -280,26 +296,34 @@ class GraphAgent:
         chain = (
             prompt 
             | self.llm.bind_tools(
-                self.processing_tools,
+                self.RAG_tools,
                 parallel_tool_calls=False,
             )
         )
         
          # 1) Invoke the chain on the user query
-        new_ai_message = chain.invoke(state)
+        new_ai_message = chain.invoke({**state,**{"schema":self.arango_graph.schema}})
 
         # 2) Return updated messages by *appending* new_ai_message to the state
         return {
             "messages": state["messages"] + [new_ai_message]
         }
-    def visualization_agent(self, state: GraphState):
+    
+    # def PostRAG(self, state: GraphState):
+    #     """Post RAG Step to store the results"""
+    #     return {
+    #         "RAG_reply": state["messages"][-1].content,
+    #         "messages""
+    #     }
+    
+    def Visualizer(self, state: GraphState):
         """Agent for visualization phase"""
         prompt = ChatPromptTemplate.from_messages([
             ("system", "You are a visualization expert. Create visual representations of the data."),
             ("user", "Visualize results for: {user_query}\n\nData: {data}")
         ])
-        chain = prompt | self.llm.bind_tools(self.visualization_tools)
-        return {"messages": [chain.invoke(state)]}
+        # chain = prompt | self.llm.bind_tools(self.visualization_tools)
+        return {"messages": ["Visulaization Done"]}
 
     def generate_graph_visualization(self, query: str):
         """Tool to generate graph visualizations"""
@@ -344,21 +368,3 @@ class GraphAgent:
         return final_state["messages"][-1].content
 
  
-    # def handle_tool_error(state) -> dict:
-    #     error = state.get("error")
-    #     tool_calls = state["messages"][-1].tool_calls
-    #     return {
-    #         "messages": [
-    #             ToolMessage(
-    #                 content=f"Error: {repr(error)}\nPlease fix your mistakes.",
-    #                 tool_call_id=tc["id"],
-    #             )
-    #             for tc in tool_calls
-    #         ]
-    #     }
-
-    # def create_tool_node_with_fallback(self, tools: list) -> dict:
-    #     return ToolNode(tools).with_fallbacks(
-    #         [RunnableLambda(self.handle_tool_error)], 
-    #         exception_key="error"
-    #     )
