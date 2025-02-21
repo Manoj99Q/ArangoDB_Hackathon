@@ -164,6 +164,7 @@ def agent_wrapper(query):
     try:
         # Direct call to generate visualization without using agent
         iframe_html = generate_dynamic_graph_html(query)
+        print(iframe_html)
         return gr.HTML(value=iframe_html)
     except Exception as e:
         print(f"Error in agent_wrapper: {str(e)}")
