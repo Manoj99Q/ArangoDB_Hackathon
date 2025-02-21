@@ -19,6 +19,7 @@ from langgraph.graph import StateGraph, END
 from IPython.display import Image, display
 from langgraph.prebuilt import tools_condition
 from pprint import pprint
+import gradio as gr
 # Load environment variables
 load_dotenv()
 
@@ -37,7 +38,7 @@ class GraphState(TypedDict):
     user_query: str  # To track the current query being processed
     data: Annotated[list[dict[str, Any]], add_data]
     RAG_reply: str
-    iframe_html: str
+    iframe_html: any
     
 
 class GraphAgent:
@@ -51,12 +52,12 @@ class GraphAgent:
         """
         self.arango_graph = arango_graph
         self.networkx_graph = networkx_graph
-        self.llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
-        # self.llm = ChatAnthropic(
-        #     model="claude-3-5-sonnet-20241022",
-        #     temperature=0,
-        #     anthropic_api_key=os.getenv('ANTHROPIC_API_KEY')
-        # )
+        # self.llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
+        self.llm = ChatAnthropic(
+            model="claude-3-5-sonnet-20241022",
+            temperature=0,
+            anthropic_api_key=os.getenv('ANTHROPIC_API_KEY')
+        )
 
         
         # Create separate tool sets
@@ -477,7 +478,7 @@ class GraphAgent:
             # return iframe_html
             return Command(
                 update={
-                    "iframe_html": iframe_html,
+                    "iframe_html": gr.HTML(value=iframe_html),
                     "messages": [ToolMessage("Visualization Done", tool_call_id=tool_call_id)]
                 }
             )
