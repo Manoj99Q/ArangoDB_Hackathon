@@ -1,203 +1,80 @@
-
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Game User Count Visualization</title>
-    <script src="https://d3js.org/d3.v6.min.js"></script>
-    <style>
-        body { font: 14px sans-serif; }
-        .tooltip {
-            position: absolute;
-            background-color: #f0f0f0;
-            border: 1px solid #ccc;
-            padding: 5px;
-            pointer-events: none;
-        }
-        .axis path,
-        .axis line {
-            fill: none;
-            stroke: #777;
-            stroke-width: 1;
-        }
-        .bar {
-            fill: steelblue;
-        }
-        .bar:hover {
-            fill: darkblue;
-        }
-    </style>
-</head>
-<body>
-    <h1>Game User Counts</h1>
-    <svg width="1200" height="600"></svg>
-    <div id="tooltip"></div>
+            <html lang="en">
+            <head>
+            <meta charset="UTF-8">
+            <title>D3.js Visualization</title>
+            <script src="https://d3js.org/d3.v6.min.js"></script>
+            <style>
+    .total-users {
+        font-family: Arial, sans-serif;
+        font-size: 48px;
+        text-align: center;
+        color: #2c3e50;
+    }
+    .label {
+        font-family: Arial, sans-serif;
+        font-size: 18px;
+        text-align: center;
+        color: #7f8c8d;
+    }
+    .container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        padding: 20px;
+    }
+</style>
 
-    <script>
-        // Your data
-        const gameData = {
-            'game_user_counts': [
-                {
-                    'game': {
-                        'GameName': 'The Elder Scrolls V Skyrim',
-                        'userCount': 677
-                    }
-                },
-                {
-                    'game': {
-                        'GameName': 'Fallout 4',
-                        'userCount': 167
-                    }
-                },
-                {
-                    'game': {
-                        'GameName': 'Spore',
-                        'userCount': 58
-                    }
-                },
-                {
-                    'game': {
-                        'GameName': 'Fallout New Vegas',
-                        'userCount': 287
-                    }
-                },
-                {
-                    'game': {
-                        'GameName': 'Left 4 Dead 2',
-                        'userCount': 801
-                    }
-                },
-                {
-                    'game': {
-                        'GameName': 'HuniePop',
-                        'userCount': 20
-                    }
-                },
-                {
-                    'game': {
-                        'GameName': 'Path of Exile',
-                        'userCount': 191
-                    }
-                },
-                {
-                    'game': {
-                        'GameName': 'Poly Bridge',
-                        'userCount': 12
-                    }
-                },
-                {
-                    'game': {
-                        'GameName': 'Left 4 Dead',
-                        'userCount': 204
-                    }
-                },
-                {
-                    'game': {
-                        'GameName': 'Team Fortress 2',
-                        'userCount': 2323
-                    }
-                }
-            ]
-        };
+<script>
+function initViz() {
+    // Create container div
+    const container = d3.select("#visualization")
+        .append("div")
+        .attr("class", "container");
 
-        // Extract and prepare data
-        const data = gameData.game_user_counts.map(item => ({
-            gameName: item.game.GameName,
-            userCount: item.game.userCount
-        }));
+    // Add number display
+    const numberDisplay = container
+        .append("div")
+        .attr("class", "total-users");
 
-        // Set up SVG dimensions
-        const svg = d3.select("svg");
-        const width = +svg.attr("width");
-        const height = +svg.attr("height");
-        const margin = { top: 20, right: 20, bottom: 30, left: 40 };
-        const innerWidth = width - margin.left - margin.right;
-        const innerHeight = height - margin.top - margin.bottom;
+    // Add label
+    container
+        .append("div")
+        .attr("class", "label")
+        .text("Total Users");
 
-        // Set up scales
-        const xScale = d3.scaleBand()
-                         .domain(data.map(d => d.gameName))
-                         .range([0, innerWidth])
-                         .padding(0.2);
-
-        const yScale = d3.scaleLinear()
-                         .domain([0, d3.max(data, d => d.userCount) * 1.1])
-                         .range([innerHeight, 0]);
-
-        // Create group
-        const g = svg.append("g")
-                    .attr("transform", `translate(${margin.left}, ${margin.top})`);
-
-        // Create axes
-        const xAxis = d3.axisBottom(xScale);
-        const yAxis = d3.axisLeft(yScale);
-
-        g.append("g")
-         .attr("class", "axis")
-         .call(xAxis)
-         .attr("transform", `translate(0, ${innerHeight})`)
-         .selectAll("text")
-         .style("text-anchor", "end")
-         .attr("transform", "rotate(-90)");
-
-        g.append("g")
-         .attr("class", "axis")
-         .call(yAxis);
-
-        // Create bars
-        const bars = g.selectAll("rect")
-                      .data(data)
-                      .enter()
-                      .append("rect")
-                      .attr("class", "bar")
-                      .attr("x", d => xScale(d.gameName))
-                      .attr("y", d => yScale(d.userCount))
-                      .attr("width", xScale.bandwidth())
-                      .attr("height", d => innerHeight - yScale(d.userCount));
-
-        // Add tooltips
-        const tooltip = d3.select("#tooltip");
-
-        bars.on("mouseover", function(event, d) {
-            d3.select(this).attr("fill", "darkblue");
-            const content = `
-                <strong>Game:</strong> ${d.gameName}<br>
-                <strong>User Count:</strong> ${d.userCount.toLocaleString()}
-            `;
-            tooltip.style("left", (event.clientX + 10) + "px")
-                   .style("top", (event.clientY - 25) + "px")
-                   .html(content)
-                   .style("display", "block");
-        })
-        .on("mouseout", function(d) {
-            d3.select(this).attr("fill", "steelblue");
-            tooltip.style("display", "none");
+    // Animate number counting up
+    const totalUsers = 11350;
+    const duration = 2000;
+    
+    const numberFormat = d3.format(",d");
+    
+    // Create counter animation
+    const counter = d3.select(".total-users")
+        .transition()
+        .duration(duration)
+        .tween("text", function() {
+            const i = d3.interpolateNumber(0, totalUsers);
+            return function(t) {
+                this.textContent = numberFormat(Math.round(i(t)));
+            };
         });
-
-        // Add title
-        svg.append("text")
-           .attr("x", width / 2)
-           .attr("y", margin.top - 10)
-           .attr("text-anchor", "middle")
-           .style("font-size", "20px")
-           .text("Game User Counts");
-
-        // Add y-axis label
-        g.append("text")
-         .attr("x", -(height / 2))
-         .attr("y", -40)
-         .attr("text-anchor", "middle")
-         .attr("transform", "rotate(-90)")
-         .style("font-size", "14px")
-         .text("User Count");
-
-        // Add x-axis label
-        g.append("text")
-         .attr("x", innerWidth / 2)
-         .attr("y", innerHeight + 25)
-         .attr("text-anchor", "middle")
-         .style("font-size", "14px")
-         .text("Game");
-    </script>
-</body>
-</html>
+}
+</script>
+            </head>
+            <body>
+            <div id="visualization">
+            </div>
+            <script>
+                // Wait for DOM to be ready
+                document.addEventListener('DOMContentLoaded', function() {
+                    // Initialize D3 visualization after DOM is ready
+                    if (typeof initViz === 'function') {
+                        initViz();
+                    }
+                });
+            </script>
+            </body>
+            </html>

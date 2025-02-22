@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 import os
 from langgraph.graph import StateGraph, END
 from IPython.display import Image, display
-from langgraph.prebuilt import tools_condition
+from langgraph.prebuilt import InjectedState
 from pprint import pprint
 import gradio as gr
 # Load environment variables
@@ -54,12 +54,12 @@ class GraphAgent:
         self.arango_graph = arango_graph
         self.networkx_graph = networkx_graph
         self.llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
-        # self.llm = ChatAnthropic(
-        #     model="claude-3-5-sonnet-20241022",
-        #     temperature=0,
-        #     anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
-        #     max_tokens=8192
-        # )
+        self.claude_llm = ChatAnthropic(
+            model="claude-3-5-sonnet-20241022",
+            temperature=0,
+            anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
+            max_tokens=8192
+        )
 
         
         # Create separate tool sets
@@ -118,7 +118,7 @@ class GraphAgent:
             }
         )
 
-    def text_to_nx_algorithm_to_text(self, query: str,tool_call_id: str):
+    def text_to_nx_algorithm_to_text(self, query: str,tool_call_id: str,name: str):
         """This tool executes NetworkX algorithms based on natural language queries."""
         if self.networkx_graph is None:
             return "Error: NetworkX graph is not initialized"
@@ -142,7 +142,23 @@ class GraphAgent:
         Make sure that `FINAL_RESULT` stores all the information for example a list of nodes, edges, etc.
         Make sure that `FINAL_RESULT` contains not just the ID but the actual node/edge object with all the properties.
 
+        Example:
+        Question:Perform PageRank analysis on the SteamGraph to identify the most influential game based on user-game interactions
+        # Assuming G_adb is already defined and is a NetworkX Graph object
+        import networkx as nx
 
+        # Perform PageRank analysis
+        pagerank_scores = nx.pagerank(G_adb, weight='weight')
+
+        # Find the most influential game based on PageRank scores
+        # Since the graph is undirected, we need to filter out the game nodes
+        game_nodes = [node for node, data in G_adb.nodes(data=True) if data.get('type') == 'Games']
+
+        # Get the game with the highest PageRank score
+        most_influential_game = max(game_nodes, key=lambda node: pagerank_scores.get(node, 0))
+
+        # Retrieve the node data for the most influential game
+        FINAL_RESULT = G_adb.nodes[most_influential_game]
         Your code:
         """).content
 
@@ -153,13 +169,11 @@ class GraphAgent:
         print('-'*10)
 
         print("\n2) Executing NetworkX code")
-        global_vars = {"G_adb": self.networkx_graph, "nx": nx}
-        local_vars = {}
-
         try:
-            exec(text_to_nx_cleaned, global_vars, local_vars)
-            text_to_nx_final = text_to_nx
-            FINAL_RESULT = local_vars["FINAL_RESULT"]
+            context = {"G_adb": self.networkx_graph, "nx": nx}
+            exec(text_to_nx_cleaned, context)
+            FINAL_RESULT = context["FINAL_RESULT"]
+
         except Exception as e:
             print(f"EXEC ERROR: {e}")
             return f"EXEC ERROR: {e}"
@@ -174,7 +188,7 @@ class GraphAgent:
         I have the following graph analysis query: {query}.
         I have executed the following python code to help me answer my query:
         ---
-        {text_to_nx_final}
+        {text_to_nx_cleaned}
         ---
         The `FINAL_RESULT` variable is set to: {FINAL_RESULT}.
         Based on my original Query and FINAL_RESULT, generate a short and concise response.
@@ -184,7 +198,7 @@ class GraphAgent:
     
         return Command(
             update={
-                "data": FINAL_RESULT,
+                "data": {name: FINAL_RESULT},
                 "messages": [ToolMessage(response,tool_call_id=tool_call_id)]
             }
         )
@@ -206,7 +220,7 @@ class GraphAgent:
                 return f"Error: {e}"
             
         @tool
-        def NX_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: Annotated[str, "Natural Language Query"]):
+        def NX_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: Annotated[str, "Natural Language Query"],name: Annotated[str, "Name of the variable to store the result"]):
             """Analyze graph structure and patterns using NetworkX algorithms.
                 Best for:
                 - Finding shortest paths
@@ -214,7 +228,7 @@ class GraphAgent:
                 - Detecting communities
                 - Complex network analysis"""
             try:
-                return self.text_to_nx_algorithm_to_text(query,tool_call_id=tool_call_id)
+                return self.text_to_nx_algorithm_to_text(query,tool_call_id=tool_call_id,name=name)
             except Exception as e:
                 return f"Error: {e}"
         return [
@@ -226,9 +240,9 @@ class GraphAgent:
         """Tools for visualization stage"""
 
         @tool
-        def graph_vis_Wrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: str):
+        def graph_vis_Wrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: str,state: Annotated[dict, InjectedState]):
             """Generate visual representations of graph data"""
-            return self.generate_dynamic_graph_html(query,tool_call_id=tool_call_id)
+            return self.generate_dynamic_graph_html(query,tool_call_id=tool_call_id,state=state)
         
         return [
             graph_vis_Wrapper
@@ -366,182 +380,158 @@ class GraphAgent:
             "messages": state["messages"] + [new_ai_message]
         }
 
-    def generate_dynamic_graph_html(self,query,tool_call_id: str):
-        """Dynamically generates a complete HTML document for an interactive D3.js visualization.
+    def generate_dynamic_graph_html(self,query,tool_call_id: str,state: GraphState):
+        """Dynamically generates style and script tags for an interactive D3.js visualization.
         Needs clear instruction on what type of plot to generate"""
-        sample_html = """<!DOCTYPE html>
+        sample_html = """<style>
+                        body { font: 14px sans-serif; }
+                        .link { stroke: #999; stroke-opacity: 0.6; }
+                        .node { stroke: #fff; stroke-width: 1.5px; }
+                    </style>
+            <script>
+    // Select the SVG element and set dimensions.
+    const svg = d3.select(\"svg\");
+    const width = +svg.attr(\"width\");
+    const height = +svg.attr(\"height\");
+
+    // Define sample nodes and links.
+    const nodes = [
+      {id: \"A\"}, {id: \"B\"}, {id: \"C\"}, {id: \"D\"}, {id: \"E\"}
+    ];
+    const links = [
+      {source: \"A\", target: \"B\"},
+      {source: \"A\", target: \"C\"},
+      {source: \"B\", target: \"D\"},
+      {source: \"C\", target: \"D\"},
+      {source: \"D\", target: \"E\"}
+    ];
+
+    // Create a simulation with forces.
+    const simulation = d3.forceSimulation(nodes)
+                         .force(\"link\", d3.forceLink(links).id(d => d.id).distance(100))
+                         .force(\"charge\", d3.forceManyBody().strength(-300))
+                         .force(\"center\", d3.forceCenter(width / 2, height / 2));
+
+    // Create and style the links.
+    const link = svg.append(\"g\")
+                    .attr(\"class\", \"links\")
+                    .selectAll(\"line\")
+                    .data(links)
+                    .enter().append(\"line\")
+                    .attr(\"class\", \"link\")
+                    .attr(\"stroke-width\", 2);
+
+    // Create and style the nodes.
+    const node = svg.append(\"g\")
+                    .attr(\"class\", \"nodes\")
+                    .selectAll(\"circle\")
+                    .data(nodes)
+                    .enter().append(\"circle\")
+                    .attr(\"class\", \"node\")
+                    .attr(\"r\", 10)
+                    .attr(\"fill\", \"steelblue\")
+                    .call(d3.drag()
+                        .on(\"start\", dragstarted)
+                        .on(\"drag\", dragged)
+                        .on(\"end\", dragended));
+
+    // Add a tooltip to each node.
+    node.append(\"title\")
+        .text(d => d.id);
+
+    // Update positions on each tick of the simulation.
+    simulation.on(\"tick\", () => {
+      link.attr(\"x1\", d => d.source.x)
+          .attr(\"y1\", d => d.source.y)
+          .attr(\"x2\", d => d.target.x)
+          .attr(\"y2\", d => d.target.y);
+
+      node.attr(\"cx\", d => d.x)
+          .attr(\"cy\", d => d.y);
+    });
+
+    // Define drag event functions.
+    function dragstarted(event, d) {
+      if (!event.active) simulation.alphaTarget(0.3).restart();
+      d.fx = d.x;
+      d.fy = d.y;
+    }
+    function dragged(event, d) {
+      d.fx = event.x;
+      d.fy = event.y;
+    }
+    function dragended(event, d) {
+      if (!event.active) simulation.alphaTarget(0);
+      d.fx = null;
+      d.fy = null;
+    }
+  </script>"""
+        
+
+        prompt = (
+            "You are an expert web developer specializing in interactive D3.js visualizations. "
+            "Generate only the <style> and <script> tags needed for a D3.js visualization based on the following specification: "
+            + query + " "
+            "For reference, here is an example showing both SVG and div-based visualizations: "
+            + sample_html + " "
+            "IMPORTANT: Your script must define an initViz() function that will be called after the DOM is ready. "
+            "All D3.js initialization and manipulation should happen inside this function. "
+            "The #visualization div will be empty when your code runs - your code needs to create any necessary elements. "
+            "Only output the <style> and <script> tags without any other HTML elements or markdown formatting."
+            "Here is the data at hand:" + str(state["data"])
+        )
+        try:
+            print("Generating style and script code for visualization")
+            # Get response from ChatOpenAI
+            response = self.claude_llm.invoke(prompt)
+            # Extract content from the response
+            code = response.content
+            # Remove markdown formatting if present
+            if code.startswith("```html"):
+                code = code[7:-3]  # Remove ```html and ``` markers
+            elif code.startswith("```"):
+                code = code[3:-3]  # Remove ``` markers
+                
+            # Print the generated code for debugging
+            print("\nGenerated Style and Script Code:")
+            print("=" * 50)
+
+            print("=" * 50)
+            
+            # Wrap the style and script tags in a basic HTML structure
+            html_code = f"""<!DOCTYPE html>
             <html lang="en">
             <head>
             <meta charset="UTF-8">
-            <title>D3.js Force-Directed Graph</title>
+            <title>D3.js Visualization</title>
             <script src="https://d3js.org/d3.v6.min.js"></script>
-            <style>
-                body { 
-                    font: 14px sans-serif;
-                    margin: 0;
-                    padding: 0;
-                    width: 100%;
-                    height: 100%;
-                }
-                #graph-container {
-                    width: 100%;
-                    height: 100%;
-                }
-                svg {
-                    width: 100% !important;
-                    height: 100% !important;
-                    min-height: 600px;
-                }
-                .link { 
-                    stroke: #999; 
-                    stroke-opacity: 0.6; 
-                }
-                .node { 
-                    stroke: #fff; 
-                    stroke-width: 1.5px; 
-                }
-            </style>
+            {code}
             </head>
             <body>
-            <h1>Interactive Force-Directed Graph</h1>
-            <div id="graph-container">
-                <svg></svg>
+            <div id="visualization">
             </div>
             <script>
-                // Get container dimensions
-                const container = document.getElementById("graph-container");
-                const svg = d3.select("svg");
-                
-                // Set viewBox for responsiveness
-                const bbox = svg.node().getBoundingClientRect();
-                const width = bbox.width || 1000;  // fallback width
-                const height = bbox.height || 600;  // fallback height
-                svg.attr("viewBox", "0 0 " + width + " " + height)
-                   .attr("preserveAspectRatio", "xMidYMid meet");
-
-                // Define sample nodes and links
-                const nodes = [
-                    {id: "A"}, {id: "B"}, {id: "C"}, {id: "D"}, {id: "E"}
-                ];
-                const links = [
-                    {source: "A", target: "B"},
-                    {source: "A", target: "C"},
-                    {source: "B", target: "D"},
-                    {source: "C", target: "D"},
-                    {source: "D", target: "E"}
-                ];
-
-                // Create a simulation with forces
-                const simulation = d3.forceSimulation(nodes)
-                    .force("link", d3.forceLink(links).id(d => d.id).distance(100))
-                    .force("charge", d3.forceManyBody().strength(-300))
-                    .force("center", d3.forceCenter(width / 2, height / 2));
-
-                // Create and style the links
-                const link = svg.append("g")
-                    .attr("class", "links")
-                    .selectAll("line")
-                    .data(links)
-                    .enter().append("line")
-                    .attr("class", "link")
-                    .attr("stroke-width", 2);
-
-                // Create and style the nodes
-                const node = svg.append("g")
-                    .attr("class", "nodes")
-                    .selectAll("circle")
-                    .data(nodes)
-                    .enter().append("circle")
-                    .attr("class", "node")
-                    .attr("r", 10)
-                    .attr("fill", "steelblue")
-                    .call(d3.drag()
-                        .on("start", dragstarted)
-                        .on("drag", dragged)
-                        .on("end", dragended));
-
-                // Add tooltips
-                node.append("title")
-                    .text(d => d.id);
-
-                // Update positions on each tick
-                simulation.on("tick", () => {
-                    link.attr("x1", d => d.source.x)
-                        .attr("y1", d => d.source.y)
-                        .attr("x2", d => d.target.x)
-                        .attr("y2", d => d.target.y);
-
-                    node.attr("cx", d => d.x)
-                        .attr("cy", d => d.y);
-                });
-
-                // Handle window resizing
-                window.addEventListener("resize", function() {
-                    const newBbox = svg.node().getBoundingClientRect();
-                    const newWidth = newBbox.width || width;
-                    const newHeight = newBbox.height || height;
-                    
-                    // Update viewBox
-                    svg.attr("viewBox", "0 0 " + newWidth + " " + newHeight);
-                    
-                    // Update force center
-                    simulation.force("center", d3.forceCenter(newWidth / 2, newHeight / 2));
-                    simulation.alpha(0.3).restart();
-                });
-
-                // Define drag event functions
-                function dragstarted(event, d) {
-                    if (!event.active) simulation.alphaTarget(0.3).restart();
-                    d.fx = d.x;
-                    d.fy = d.y;
-                }
-                
-                function dragged(event, d) {
-                    d.fx = event.x;
-                    d.fy = event.y;
-                }
-                
-                function dragended(event, d) {
-                    if (!event.active) simulation.alphaTarget(0);
-                    d.fx = null;
-                    d.fy = null;
-                }
+                // Wait for DOM to be ready
+                document.addEventListener('DOMContentLoaded', function() {{
+                    // Initialize D3 visualization after DOM is ready
+                    if (typeof initViz === 'function') {{
+                        initViz();
+                    }}
+                }});
             </script>
             </body>
             </html>"""
-        prompt = (
-            "You are an expert web developer specializing in interactive D3.js visualizations. "
-            "Generate a complete, self-contained HTML document that includes <!DOCTYPE html>, <html>, <head>, and <body> tags. "
-            "Integrate D3.js from 'https://d3js.org/d3.v6.min.js' to create an interactive visualization based on the following specification: "
-            + query + " "
-            "For reference, here is an example of a Force-Directed Graph: "
-            + sample_html + " "
-            "Only output the complete HTML code without any explanation or markdown formatting."
-        )
-        try:
-            print("Generating HTML code for visualization")
-            # Get response from ChatOpenAI
-            response = self.llm.invoke(prompt)
-            # Extract HTML content from the response
-            html_code = response.content
-            # Remove markdown formatting if present
-            if html_code.startswith("```html"):
-                html_code = html_code[7:-3]  # Remove ```html and ``` markers
-            elif html_code.startswith("```"):
-                html_code = html_code[3:-3]  # Remove ``` markers
-                
-            # Print the generated HTML code for debugging
-            print("\nGenerated HTML Code:")
+             # Print the generated code for debugging
+            print("\nGenerated Style and Script Code:")
             print("=" * 50)
             print(html_code)
             print("=" * 50)
-            
+
             encoded_html = base64.b64encode(html_code.encode('utf-8')).decode('utf-8')
             data_url = f"data:text/html;base64,{encoded_html}"
             
-            # Following the pattern from main.py
             iframe_html = f'<iframe src="{data_url}" width="620" height="420" frameborder="0"></iframe>'
-            # return iframe_html
+            
             return Command(
                 update={
                     "iframe_html": gr.HTML(value=iframe_html),
