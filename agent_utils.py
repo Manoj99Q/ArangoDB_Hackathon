@@ -39,7 +39,7 @@ class GraphState(TypedDict):
     data: Annotated[list[dict[str, Any]], add_data]
     RAG_reply: str
     iframe_html: any
-    graph_schema: dict[str, Any]
+    # graph_schema: dict[str, Any]
     
 
 class GraphAgent:
@@ -53,12 +53,13 @@ class GraphAgent:
         """
         self.arango_graph = arango_graph
         self.networkx_graph = networkx_graph
-        # self.llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
-        self.llm = ChatAnthropic(
-            model="claude-3-5-sonnet-20241022",
-            temperature=0,
-            anthropic_api_key=os.getenv('ANTHROPIC_API_KEY')
-        )
+        self.llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
+        # self.llm = ChatAnthropic(
+        #     model="claude-3-5-sonnet-20241022",
+        #     temperature=0,
+        #     anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'),
+        #     max_tokens=8192
+        # )
 
         
         # Create separate tool sets
@@ -86,11 +87,25 @@ class GraphAgent:
             verbose=True,
             allow_dangerous_requests=True,
             return_aql_query=True,
-            return_aql_result=True
+            return_aql_result=True,
+            aql_examples = """
+            #Find the game that has been played by the most players
+            WITH Games, plays
+            FOR game IN Games 
+            LET playerCount = (
+                FOR play IN plays 
+                FILTER play._to == game._id 
+                COLLECT WITH COUNT INTO length 
+                RETURN length
+            )[0] 
+            SORT playerCount DESC 
+            LIMIT 1 
+            RETURN {game, playerCount: playerCount}
+            """
 
         )
         
-        result = chain.invoke(query)
+        result = chain.invoke(query+ " \n  Important: if returning a node always return the node object with all the properties")
 
         print("print AQL tool result")
         print(result)
@@ -332,17 +347,19 @@ class GraphAgent:
         print("Visualizer State:")
         pprint(state, indent=2, width=80)
         
-        # Check visualization status
-        # vis_status = "No visualization generated yet." if not state.get("iframe_html") else "Visualization is ready.You can skip the visualization step."
-        # print("Visualization Status:")
-        # print(vis_status)
+
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a visualization expert. Create visual representations of the data."),
+            ("system", """You are a visualization expert. Create visual representations of the data. 
+                         RULES:
+                        - Generate Only One graph for the whole
+                        - Come up with different visualizations based on the data and the query
+                        - Example: a bar chart for number of hours played by each user or number users a game has been played by 
+                         -Use graph type charts when you have edge type and node type  data"""),
             ("user", "Visualize for: {user_query}\n\n And the data at hand is: {data}\n\n"),
             ("placeholder", "{messages}")
         ])
         
-        chain = prompt | self.llm.bind_tools(self.visualization_tools)
+        chain = prompt | self.llm.bind_tools(self.visualization_tools,parallel_tool_calls=False,)
         new_ai_message = chain.invoke(state)
 
         return {
@@ -353,101 +370,145 @@ class GraphAgent:
         """Dynamically generates a complete HTML document for an interactive D3.js visualization.
         Needs clear instruction on what type of plot to generate"""
         sample_html = """<!DOCTYPE html>
-            <html lang=\"en\">
+            <html lang="en">
             <head>
-            <meta charset=\"UTF-8\">
+            <meta charset="UTF-8">
             <title>D3.js Force-Directed Graph</title>
-            <script src=\"https://d3js.org/d3.v6.min.js\"></script>
+            <script src="https://d3js.org/d3.v6.min.js"></script>
             <style>
-                body { font: 14px sans-serif; }
-                .link { stroke: #999; stroke-opacity: 0.6; }
-                .node { stroke: #fff; stroke-width: 1.5px; }
+                body { 
+                    font: 14px sans-serif;
+                    margin: 0;
+                    padding: 0;
+                    width: 100%;
+                    height: 100%;
+                }
+                #graph-container {
+                    width: 100%;
+                    height: 100%;
+                }
+                svg {
+                    width: 100% !important;
+                    height: 100% !important;
+                    min-height: 600px;
+                }
+                .link { 
+                    stroke: #999; 
+                    stroke-opacity: 0.6; 
+                }
+                .node { 
+                    stroke: #fff; 
+                    stroke-width: 1.5px; 
+                }
             </style>
             </head>
             <body>
             <h1>Interactive Force-Directed Graph</h1>
-            <svg width=\"600\" height=\"400\"></svg>
+            <div id="graph-container">
+                <svg></svg>
+            </div>
             <script>
-                // Select the SVG element and set dimensions.
-                const svg = d3.select(\"svg\");
-                const width = +svg.attr(\"width\");
-                const height = +svg.attr(\"height\");
+                // Get container dimensions
+                const container = document.getElementById("graph-container");
+                const svg = d3.select("svg");
+                
+                // Set viewBox for responsiveness
+                const bbox = svg.node().getBoundingClientRect();
+                const width = bbox.width || 1000;  // fallback width
+                const height = bbox.height || 600;  // fallback height
+                svg.attr("viewBox", "0 0 " + width + " " + height)
+                   .attr("preserveAspectRatio", "xMidYMid meet");
 
-                // Define sample nodes and links.
+                // Define sample nodes and links
                 const nodes = [
-                {id: \"A\"}, {id: \"B\"}, {id: \"C\"}, {id: \"D\"}, {id: \"E\"}
+                    {id: "A"}, {id: "B"}, {id: "C"}, {id: "D"}, {id: "E"}
                 ];
                 const links = [
-                {source: \"A\", target: \"B\"},
-                {source: \"A\", target: \"C\"},
-                {source: \"B\", target: \"D\"},
-                {source: \"C\", target: \"D\"},
-                {source: \"D\", target: \"E\"}
+                    {source: "A", target: "B"},
+                    {source: "A", target: "C"},
+                    {source: "B", target: "D"},
+                    {source: "C", target: "D"},
+                    {source: "D", target: "E"}
                 ];
 
-                // Create a simulation with forces.
+                // Create a simulation with forces
                 const simulation = d3.forceSimulation(nodes)
-                                    .force(\"link\", d3.forceLink(links).id(d => d.id).distance(100))
-                                    .force(\"charge\", d3.forceManyBody().strength(-300))
-                                    .force(\"center\", d3.forceCenter(width / 2, height / 2));
+                    .force("link", d3.forceLink(links).id(d => d.id).distance(100))
+                    .force("charge", d3.forceManyBody().strength(-300))
+                    .force("center", d3.forceCenter(width / 2, height / 2));
 
-                // Create and style the links.
-                const link = svg.append(\"g\")
-                                .attr(\"class\", \"links\")
-                                .selectAll(\"line\")
-                                .data(links)
-                                .enter().append(\"line\")
-                                .attr(\"class\", \"link\")
-                                .attr(\"stroke-width\", 2);
+                // Create and style the links
+                const link = svg.append("g")
+                    .attr("class", "links")
+                    .selectAll("line")
+                    .data(links)
+                    .enter().append("line")
+                    .attr("class", "link")
+                    .attr("stroke-width", 2);
 
-                // Create and style the nodes.
-                const node = svg.append(\"g\")
-                                .attr(\"class\", \"nodes\")
-                                .selectAll(\"circle\")
-                                .data(nodes)
-                                .enter().append(\"circle\")
-                                .attr(\"class\", \"node\")
-                                .attr(\"r\", 10)
-                                .attr(\"fill\", \"steelblue\")
-                                .call(d3.drag()
-                                    .on(\"start\", dragstarted)
-                                    .on(\"drag\", dragged)
-                                    .on(\"end\", dragended));
+                // Create and style the nodes
+                const node = svg.append("g")
+                    .attr("class", "nodes")
+                    .selectAll("circle")
+                    .data(nodes)
+                    .enter().append("circle")
+                    .attr("class", "node")
+                    .attr("r", 10)
+                    .attr("fill", "steelblue")
+                    .call(d3.drag()
+                        .on("start", dragstarted)
+                        .on("drag", dragged)
+                        .on("end", dragended));
 
-                // Add a tooltip to each node.
-                node.append(\"title\")
+                // Add tooltips
+                node.append("title")
                     .text(d => d.id);
 
-                // Update positions on each tick of the simulation.
-                simulation.on(\"tick\", () => {
-                link.attr(\"x1\", d => d.source.x)
-                    .attr(\"y1\", d => d.source.y)
-                    .attr(\"x2\", d => d.target.x)
-                    .attr(\"y2\", d => d.target.y);
+                // Update positions on each tick
+                simulation.on("tick", () => {
+                    link.attr("x1", d => d.source.x)
+                        .attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x)
+                        .attr("y2", d => d.target.y);
 
-                node.attr(\"cx\", d => d.x)
-                    .attr(\"cy\", d => d.y);
+                    node.attr("cx", d => d.x)
+                        .attr("cy", d => d.y);
                 });
 
-                // Define drag event functions.
+                // Handle window resizing
+                window.addEventListener("resize", function() {
+                    const newBbox = svg.node().getBoundingClientRect();
+                    const newWidth = newBbox.width || width;
+                    const newHeight = newBbox.height || height;
+                    
+                    // Update viewBox
+                    svg.attr("viewBox", "0 0 " + newWidth + " " + newHeight);
+                    
+                    // Update force center
+                    simulation.force("center", d3.forceCenter(newWidth / 2, newHeight / 2));
+                    simulation.alpha(0.3).restart();
+                });
+
+                // Define drag event functions
                 function dragstarted(event, d) {
-                if (!event.active) simulation.alphaTarget(0.3).restart();
-                d.fx = d.x;
-                d.fy = d.y;
+                    if (!event.active) simulation.alphaTarget(0.3).restart();
+                    d.fx = d.x;
+                    d.fy = d.y;
                 }
+                
                 function dragged(event, d) {
-                d.fx = event.x;
-                d.fy = event.y;
+                    d.fx = event.x;
+                    d.fy = event.y;
                 }
+                
                 function dragended(event, d) {
-                if (!event.active) simulation.alphaTarget(0);
-                d.fx = null;
-                d.fy = null;
+                    if (!event.active) simulation.alphaTarget(0);
+                    d.fx = null;
+                    d.fy = null;
                 }
             </script>
             </body>
             </html>"""
-
         prompt = (
             "You are an expert web developer specializing in interactive D3.js visualizations. "
             "Generate a complete, self-contained HTML document that includes <!DOCTYPE html>, <html>, <head>, and <body> tags. "
@@ -499,7 +560,6 @@ class GraphAgent:
             "user_query": query,
             "data": [],  # Initialize empty data list
             "iframe_html": "",  # Initialize empty iframe
-            "graph_schema": self.arango_graph.schema
         }
         
         # Use invoke() instead of stream() to get final state directly
