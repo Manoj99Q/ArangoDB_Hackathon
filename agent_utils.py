@@ -39,6 +39,7 @@ class GraphState(TypedDict):
     data: Annotated[list[dict[str, Any]], add_data]
     RAG_reply: str
     iframe_html: any
+    graph_schema: dict[str, Any]
     
 
 class GraphAgent:
@@ -70,7 +71,7 @@ class GraphAgent:
         display(Image(self.agent.get_graph(xray=True).draw_mermaid_png()))
 
 
-    def text_to_aql_to_text(self, query: str,tool_call_id: str):
+    def text_to_aql_to_text(self, query: str,tool_call_id: str, var_name: str):
         """This tool is available to invoke the
         ArangoGraphQAChain object, which enables you to
         translate a Natural Language Query into AQL, execute
@@ -97,7 +98,7 @@ class GraphAgent:
 
         return Command(
             update={
-                "data": {"aql_result": result["aql_result"],"description": result["result"]},
+                "data": {var_name: result["aql_result"]},
                 "messages": [ToolMessage(str(result["result"]), tool_call_id=tool_call_id)]
             }
         )
@@ -112,7 +113,7 @@ class GraphAgent:
         print("-"*10)
         print("1) Generating NetworkX code")
         text_to_nx = self.llm.invoke(f"""
-        I have a NetworkX Graph called `G_adb`. It has the following schema: {self.arango_graph.schema}
+        I have a NetworkX Graph called `G_adb`. It is a undirected weighted graph. It has the following schema: {self.arango_graph.schema}
 
         I have the following graph analysis query: {query}.
 
@@ -178,19 +179,19 @@ class GraphAgent:
     def _create_RAG_tools(self):
         """Tools for data processing stage"""
         @tool
-        def AQL_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: str):
+        def AQL_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: Annotated[str, "Natural Language Query"],name: Annotated[str, "Name of the variable to store the result"]):
             """This tool is available to invoke the
             ArangoGraphQAChain object, which enables you to
             translate a Natural Language Query into AQL, execute
-            the query, and translate the result back into Natural Language.
+            the query and get the result.
             """
             try:
-                return self.text_to_aql_to_text(query,tool_call_id=tool_call_id)
+                return self.text_to_aql_to_text(query,tool_call_id=tool_call_id, var_name=name)
             except Exception as e:
                 return f"Error: {e}"
             
         @tool
-        def NX_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: str):
+        def NX_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: Annotated[str, "Natural Language Query"]):
             """Analyze graph structure and patterns using NetworkX algorithms.
                 Best for:
                 - Finding shortest paths
@@ -283,7 +284,8 @@ class GraphAgent:
                 1. Analyze the user's query
                 2. Create a step-by-step plan using available tools
                 3. Execute tools sequentially using previous results
-                4. Combine results for final answer
+                4. Always break the query into smaller parts and use the tools accordingly
+                5. Combine results for final answer
 
                 Rules:
                 → Create a plan before tool usage
@@ -292,7 +294,8 @@ class GraphAgent:
 
                 Graph Schema:
                 {schema}
-
+                Current Data at hand (This data will be updated as you use the tools):
+                {data}
                 Current Query: {user_query}
 
                 YOUR PLAN:
@@ -303,7 +306,9 @@ class GraphAgent:
             ("placeholder", "{messages}"),
 
         ])
-        
+
+
+                
         chain = (
             prompt 
             | self.llm.bind_tools(
@@ -333,7 +338,7 @@ class GraphAgent:
         # print(vis_status)
         prompt = ChatPromptTemplate.from_messages([
             ("system", "You are a visualization expert. Create visual representations of the data."),
-            ("user", "Visualize for: {user_query}\n\nData: {data}\n\n"),
+            ("user", "Visualize for: {user_query}\n\n And the data at hand is: {data}\n\n"),
             ("placeholder", "{messages}")
         ])
         
@@ -493,7 +498,8 @@ class GraphAgent:
             # "vis_messages": [HumanMessage(content=query)],
             "user_query": query,
             "data": [],  # Initialize empty data list
-            "iframe_html": ""  # Initialize empty iframe
+            "iframe_html": "",  # Initialize empty iframe
+            "graph_schema": self.arango_graph.schema
         }
         
         # Use invoke() instead of stream() to get final state directly
