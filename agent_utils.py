@@ -204,6 +204,39 @@ class GraphAgent:
         )
 
    
+ 
+    def get_node_by_id(self, collection: Annotated[str, "The collection name (e.g., 'Games' or 'Users')"], node_id: Annotated[str, "The ID of the node to retrieve"],tool_call_id:str):
+        """Retrieve a node from ArangoDB by collection name and ID."""
+        try:
+            # Get the collection from ArangoDB
+            collection = self.arango_graph.db.collection(collection)
+            
+            # Get the document by ID
+            # If ID doesn't include collection prefix, add it
+            if not ":" in node_id:
+                node_id = f"{collection.name}:{node_id}"
+            
+            document = collection.get(node_id)
+            
+            if document is None:
+                return Command(
+                    update={
+                        "messages": [ToolMessage(f"Node {node_id} not found in collection {collection.name}", tool_call_id=tool_call_id)]
+                    }
+                )
+            
+            return Command(
+                update={
+                    "data": {node_id: document},
+                    "messages": [ToolMessage(f"Retrieved node {node_id} from collection {collection.name}. Node data: {document}", tool_call_id=tool_call_id)]
+                }
+            )
+        except Exception as e:
+            return Command(
+                update={
+                    "messages": [ToolMessage(f"Error retrieving node: {str(e)}", tool_call_id=tool_call_id)]
+                }
+            )
 
     def _create_RAG_tools(self):
         """Tools for data processing stage"""
@@ -231,9 +264,20 @@ class GraphAgent:
                 return self.text_to_nx_algorithm_to_text(query,tool_call_id=tool_call_id,name=name)
             except Exception as e:
                 return f"Error: {e}"
+
+        @tool
+        def get_node(tool_call_id: Annotated[str, InjectedToolCallId], 
+                    collection: Annotated[str, "The collection name (e.g., 'Games' or 'Users')"],
+                    node_id: Annotated[str, "The ID of the node to retrieve"]):
+            """Retrieve a specific node from the graph by its collection name and ID.
+            The collection should be either 'Games' or 'Users'.
+            The node_id can be provided with or without the collection prefix."""
+            return self.get_node_by_id(collection, node_id, tool_call_id)
+
         return [
             AQL_QueryWrapper,
-            NX_QueryWrapper
+            NX_QueryWrapper,
+            get_node
         ]
 
     def _create_visualization_tools(self):
