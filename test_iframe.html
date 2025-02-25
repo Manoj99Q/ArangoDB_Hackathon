@@ -1,80 +1,227 @@
 <!DOCTYPE html>
-            <html lang="en">
-            <head>
-            <meta charset="UTF-8">
-            <title>D3.js Visualization</title>
-            <script src="https://d3js.org/d3.v6.min.js"></script>
-            <style>
-    .total-users {
-        font-family: Arial, sans-serif;
-        font-size: 48px;
-        text-align: center;
-        color: #2c3e50;
-    }
-    .label {
-        font-family: Arial, sans-serif;
-        font-size: 18px;
-        text-align: center;
-        color: #7f8c8d;
-    }
-    .container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        height: 100%;
-        padding: 20px;
-    }
-</style>
-
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>D3.js Visualization</title>
+  <script src="https://d3js.org/d3.v6.min.js"></script>
+  <style>
+    body { font: 14px sans-serif; margin: 20px; }
+    svg { border: 1px solid #ccc; }
+    /* The visualization-specific CSS will be provided by the model */
+  </style>
+</head>
+<body>
+  <h2 id="visualization-title">Data Visualization</h2>
+  <div id="visualization-container">
+    <svg width="600" height="400"></svg>
+  </div>
 <script>
-function initViz() {
-    // Create container div
-    const container = d3.select("#visualization")
-        .append("div")
-        .attr("class", "container");
+    data = [ { 'Games/11359_team_fortress_2': { 'GameName': 'Team Fortress 2',
+                                               '_id': 'Games/11359_team_fortress_2',
+                                               '_key': '11359_team_fortress_2',
+                                               '_rev': '_jPaYcPm--H',
+                                               'type': 'Games'}},
+            { 'Games/11371_dota_2': { 'GameName': 'Dota 2',
+                                      '_id': 'Games/11371_dota_2',
+                                      '_key': '11371_dota_2',
+                                      '_rev': '_jPaYcPq--B',
+                                      'type': 'Games'}},
+            { 'team_fortress_2_users': [ { '_id': 'Users/151603712',
+                                           '_key': '151603712',
+                                           '_rev': '_jPaYbhm---',
+                                           'steamid': 151603712,
+                                           'type': 'Users'},
+                                         { '_id': 'Users/59945701',
+                                           '_key': '59945701',
+                                           '_rev': '_jPaYbhm--A',
+                                           'steamid': 59945701,
+                                           'type': 'Users'},
+                                         { '_id': 'Users/140954425',
+                                           '_key': '140954425',
+                                           '_rev': '_jPaYbhm--C',
+                                           'steamid': 140954425,
+                                           'type': 'Users'},
+                                         { '_id': 'Users/150128162',
+                                           '_key': '150128162',
+                                           '_rev': '_jPaYbhm--G',
+                                           'steamid': 150128162,
+                                           'type': 'Users'},
+                                         { '_id': 'Users/297811211',
+                                           '_key': '297811211',
+                                           '_rev': '_jPaYbhm--J',
+                                           'steamid': 297811211,
+                                           'type': 'Users'},
+                                         { '_id': 'Users/126340495',
+                                           '_key': '126340495',
+                                           '_rev': '_jPaYbhm--N',
+                                           'steamid': 126340495,
+                                           'type': 'Users'},
+                                         { '_id': 'Users/254906420',
+                                           '_key': '254906420',
+                                           '_rev': '_jPaYbhm--U',
+                                           'steamid': 254906420,
+                                           'type': 'Users'},
+                                         { '_id': 'Users/97298878',
+                                           '_key': '97298878',
+                                           '_rev': '_jPaYbhm--Y',
+                                           'steamid': 97298878,
+                                           'type': 'Users'},
+                                         { '_id': 'Users/99189757',
+                                           '_key': '99189757',
+                                           '_rev': '_jPaYbhm--g',
+                                           'steamid': 99189757,
+                                           'type': 'Users'},
+                                         { '_id': 'Users/226212066',
+                                           '_key': '226212066',
+                                           '_rev': '_jPaYbhm--l',
+                                           'steamid': 226212066,
+                                           'type': 'Users'}]},
+            { 'dota_2_users': [ { '_id': 'Users/151603712',
+                                  '_key': '151603712',
+                                  '_rev': '_jPaYbhm---',
+                                  'steamid': 151603712,
+                                  'type': 'Users'},
+                                { '_id': 'Users/187131847',
+                                  '_key': '187131847',
+                                  '_rev': '_jPaYbhm--_',
+                                  'steamid': 187131847,
+                                  'type': 'Users'},
+                                { '_id': 'Users/176410694',
+                                  '_key': '176410694',
+                                  '_rev': '_jPaYbhm--E',
+                                  'steamid': 176410694,
+                                  'type': 'Users'},
+                                { '_id': 'Users/197278511',
+                                  '_key': '197278511',
+                                  '_rev': '_jPaYbhm--F',
+                                  'steamid': 197278511,
+                                  'type': 'Users'},
+                                { '_id': 'Users/197455089',
+                                  '_key': '197455089',
+                                  '_rev': '_jPaYbhm--H',
+                                  'steamid': 197455089,
+                                  'type': 'Users'},
+                                { '_id': 'Users/218323237',
+                                  '_key': '218323237',
+                                  '_rev': '_jPaYbhm--L',
+                                  'steamid': 218323237,
+                                  'type': 'Users'},
+                                { '_id': 'Users/302186258',
+                                  '_key': '302186258',
+                                  '_rev': '_jPaYbhm--M',
+                                  'steamid': 302186258,
+                                  'type': 'Users'},
+                                { '_id': 'Users/126340495',
+                                  '_key': '126340495',
+                                  '_rev': '_jPaYbhm--N',
+                                  'steamid': 126340495,
+                                  'type': 'Users'},
+                                { '_id': 'Users/194895541',
+                                  '_key': '194895541',
+                                  '_rev': '_jPaYbhm--O',
+                                  'steamid': 194895541,
+                                  'type': 'Users'},
+                                { '_id': 'Users/170625356',
+                                  '_key': '170625356',
+                                  '_rev': '_jPaYbhm--P',
+                                  'steamid': 170625356,
+                                  'type': 'Users'}]}];
+  // Extract user lists from the data
+  const tf2Users = new Set(data[2].team_fortress_2_users.map(u => u.steamid));
+  const dota2Users = new Set(data[3].dota_2_users.map(u => u.steamid));
+  
+  // Calculate intersection
+  const commonUsers = [...tf2Users].filter(x => dota2Users.has(x));
 
-    // Add number display
-    const numberDisplay = container
-        .append("div")
-        .attr("class", "total-users");
+  // Set up the SVG
+  const svg = d3.select("svg");
+  const width = +svg.attr("width");
+  const height = +svg.attr("height");
+  
+  // Add CSS styles
+  const style = document.createElement('style');
+  style.textContent = `
+    .venn-circle {
+      fill-opacity: 0.3;
+      stroke: #333;
+      stroke-width: 2px;
+    }
+    .venn-label {
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      font-weight: bold;
+    }
+    .common-user {
+      font-size: 12px;
+      fill: #333;
+    }
+  `;
+  document.head.appendChild(style);
 
-    // Add label
-    container
-        .append("div")
-        .attr("class", "label")
-        .text("Total Users");
+  // Define circle properties
+  const circles = [
+    { name: "Team Fortress 2", x: width/3, y: height/2, r: 120, color: "#FF4C4C" },
+    { name: "Dota 2", x: (width*2)/3, y: height/2, r: 120, color: "#4CAF50" }
+  ];
 
-    // Animate number counting up
-    const totalUsers = 11350;
-    const duration = 2000;
-    
-    const numberFormat = d3.format(",d");
-    
-    // Create counter animation
-    const counter = d3.select(".total-users")
+  // Draw the circles
+  svg.selectAll("circle")
+    .data(circles)
+    .enter()
+    .append("circle")
+    .attr("cx", d => d.x)
+    .attr("cy", d => d.y)
+    .attr("r", d => d.r)
+    .attr("class", "venn-circle")
+    .style("fill", d => d.color);
+
+  // Add game labels
+  svg.selectAll(".venn-label")
+    .data(circles)
+    .enter()
+    .append("text")
+    .attr("class", "venn-label")
+    .attr("x", d => d.x)
+    .attr("y", d => d.y - d.r - 10)
+    .attr("text-anchor", "middle")
+    .text(d => d.name);
+
+  // Add common users in the intersection
+  const intersectionX = width/2;
+  const intersectionY = height/2;
+
+  svg.selectAll(".common-user")
+    .data(commonUsers)
+    .enter()
+    .append("text")
+    .attr("class", "common-user")
+    .attr("x", intersectionX)
+    .attr("y", (d, i) => intersectionY - 10 + i * 20)
+    .attr("text-anchor", "middle")
+    .text(d => `User: ${d}`);
+
+  // Add intersection label
+  svg.append("text")
+    .attr("x", intersectionX)
+    .attr("y", intersectionY - 40)
+    .attr("text-anchor", "middle")
+    .attr("class", "venn-label")
+    .text("Common Users");
+
+  // Add hover interactions
+  svg.selectAll("circle")
+    .on("mouseover", function() {
+      d3.select(this)
         .transition()
-        .duration(duration)
-        .tween("text", function() {
-            const i = d3.interpolateNumber(0, totalUsers);
-            return function(t) {
-                this.textContent = numberFormat(Math.round(i(t)));
-            };
-        });
-}
+        .duration(200)
+        .style("fill-opacity", 0.5);
+    })
+    .on("mouseout", function() {
+      d3.select(this)
+        .transition()
+        .duration(200)
+        .style("fill-opacity", 0.3);
+    });
 </script>
-            </head>
-            <body>
-            <div id="visualization">
-            </div>
-            <script>
-                // Wait for DOM to be ready
-                document.addEventListener('DOMContentLoaded', function() {
-                    // Initialize D3 visualization after DOM is ready
-                    if (typeof initViz === 'function') {
-                        initViz();
-                    }
-                });
-            </script>
-            </body>
-            </html>
+</body>
+</html>

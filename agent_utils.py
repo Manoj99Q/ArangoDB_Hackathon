@@ -205,30 +205,42 @@ class GraphAgent:
 
    
  
-    def get_node_by_id(self, collection: Annotated[str, "The collection name (e.g., 'Games' or 'Users')"], node_id: Annotated[str, "The ID of the node to retrieve"],tool_call_id:str):
-        """Retrieve a node from ArangoDB by collection name and ID."""
+    def get_node_by_attribute(self, collection: Annotated[str, "The collection name (e.g., 'Games' or 'Users')"], 
+                            attribute: Annotated[str, "The attribute name to search by (e.g., '_id', 'GameName', etc.)"],
+                            value: Annotated[str, "The value to search for"],
+                            tool_call_id: str):
+        """Retrieve a node from ArangoDB by collection name and any attribute."""
         try:
             # Get the collection from ArangoDB
             collection = self.arango_graph.db.collection(collection)
             
-            # Get the document by ID
-            # If ID doesn't include collection prefix, add it
-            if not ":" in node_id:
-                node_id = f"{collection.name}:{node_id}"
+            # If searching by _id and it doesn't include collection prefix, add it
+            if attribute == '_id' and not ":" in value:
+                value = f"{collection.name}:{value}"
             
-            document = collection.get(node_id)
+            # Build and execute AQL query to find document by attribute
+            aql = f"""
+                FOR doc IN {collection.name}
+                    FILTER doc.{attribute} == @value
+                    LIMIT 1
+                    RETURN doc
+            """
+            cursor = self.arango_graph.db.aql.execute(aql, bind_vars={'value': value})
+            
+            # Get the first (and should be only) document
+            document = next(cursor, None)
             
             if document is None:
                 return Command(
                     update={
-                        "messages": [ToolMessage(f"Node {node_id} not found in collection {collection.name}", tool_call_id=tool_call_id)]
+                        "messages": [ToolMessage(f"No node found in collection {collection.name} where {attribute} = {value}", tool_call_id=tool_call_id)]
                     }
                 )
             
             return Command(
                 update={
-                    "data": {node_id: document},
-                    "messages": [ToolMessage(f"Retrieved node {node_id} from collection {collection.name}. Node data: {document}", tool_call_id=tool_call_id)]
+                    "data": {str(document['_id']): document},
+                    "messages": [ToolMessage(f"Retrieved node from collection {collection.name} where {attribute} = {value}. Node data: {document}", tool_call_id=tool_call_id)]
                 }
             )
         except Exception as e:
@@ -241,7 +253,7 @@ class GraphAgent:
     def _create_RAG_tools(self):
         """Tools for data processing stage"""
         @tool
-        def AQL_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: Annotated[str, "Natural Language Query"],name: Annotated[str, "Name of the variable to store the result"]):
+        def AQL_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: Annotated[str, "Natural Language Query"],name: Annotated[str, "Name of the variable to store the result; dont use generic names"]):
             """This tool is available to invoke the
             ArangoGraphQAChain object, which enables you to
             translate a Natural Language Query into AQL, execute
@@ -253,7 +265,7 @@ class GraphAgent:
                 return f"Error: {e}"
             
         @tool
-        def NX_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: Annotated[str, "Natural Language Query"],name: Annotated[str, "Name of the variable to store the result"]):
+        def NX_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: Annotated[str, "Natural Language Query"],name: Annotated[str, "Name of the variable to store the result; dont use generic names"]):
             """Analyze graph structure and patterns using NetworkX algorithms.
                 Best for:
                 - Finding shortest paths
@@ -268,11 +280,13 @@ class GraphAgent:
         @tool
         def get_node(tool_call_id: Annotated[str, InjectedToolCallId], 
                     collection: Annotated[str, "The collection name (e.g., 'Games' or 'Users')"],
-                    node_id: Annotated[str, "The ID of the node to retrieve"]):
-            """Retrieve a specific node from the graph by its collection name and ID.
+                    attribute: Annotated[str, "The attribute name to search by (e.g., '_id', 'GameName', etc.)"],
+                    value: Annotated[str, "The value to search for"]):
+            """Retrieve a specific node from the graph by its collection name and any attribute.
             The collection should be either 'Games' or 'Users'.
-            The node_id can be provided with or without the collection prefix."""
-            return self.get_node_by_id(collection, node_id, tool_call_id)
+            The attribute can be any field in the document (e.g., '_id', 'GameName', etc.).
+            If searching by _id, the value can be provided with or without the collection prefix."""
+            return self.get_node_by_attribute(collection, attribute, value, tool_call_id)
 
         return [
             AQL_QueryWrapper,
@@ -284,8 +298,10 @@ class GraphAgent:
         """Tools for visualization stage"""
 
         @tool
-        def graph_vis_Wrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: str,state: Annotated[dict, InjectedState]):
-            """Generate visual representations of graph data"""
+        def graph_vis_Wrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: Annotated[str, "The detailed instructions on which visulation to generate"],state: Annotated[dict, InjectedState]):
+            """Generate visual representations of data based on the instructions provided
+            This tool has access to the data at hand and the current query. So no need to pass it again.
+            """
             return self.generate_dynamic_graph_html(query,tool_call_id=tool_call_id,state=state)
         
         return [
@@ -424,77 +440,157 @@ class GraphAgent:
             "messages": state["messages"] + [new_ai_message]
         }
 
-    def generate_dynamic_graph_html(self,query,tool_call_id: str,state: GraphState):
-        """Dynamically generates style and script tags for an interactive D3.js visualization.
+    def generate_dynamic_graph_html(self, query, tool_call_id: str, state: GraphState):
+        """Dynamically generates code for an interactive D3.js visualization.
         Needs clear instruction on what type of plot to generate"""
-        sample_html = """<style>
-                        body { font: 14px sans-serif; }
-                        .link { stroke: #999; stroke-opacity: 0.6; }
-                        .node { stroke: #fff; stroke-width: 1.5px; }
-                    </style>
-            <script>
-    // Select the SVG element and set dimensions.
-    const svg = d3.select(\"svg\");
-    const width = +svg.attr(\"width\");
-    const height = +svg.attr(\"height\");
+        
+        # Serialize the data to JSON for embedding in the HTML
+        import json
+        json_data = json.dumps(state["data"])
+        
+        # Create a compact representation of the data structure for the prompt
+        def create_data_preview(data, max_items=2, current_depth=0, max_depth=3):
+            """Create a compact preview of data structures for the prompt"""
+            if current_depth > max_depth:
+                return "..."
+            
+            if isinstance(data, list):
+                # For lists, include only a sample of items
+                if not data:
+                    return []
+                sample = data[:min(max_items, len(data))]
+                preview = [create_data_preview(item, max_items, current_depth+1, max_depth) for item in sample]
+                if len(data) > max_items:
+                    preview.append(f"... ({len(data) - max_items} more items)")
+                return preview
+            
+            elif isinstance(data, dict):
+                # For dictionaries, include keys and structure
+                preview = {}
+                for key, value in data.items():
+                    preview[key] = create_data_preview(value, max_items, current_depth+1, max_depth)
+                return preview
+            
+            else:
+                # For primitive types, return as is
+                return data
+        
+        # Create a preview of the data for the prompt
+        data_preview = [create_data_preview(item) for item in state["data"]]
+        
+        # HTML header template with D3.js import, minimal styling, and embedded data
+        html_header = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>D3.js Visualization</title>
+  <script src="https://d3js.org/d3.v6.min.js"></script>
+  <style>
+    body {{ font: 14px sans-serif; margin: 20px; }}
+    svg {{ border: 1px solid #ccc; }}
+    /* The visualization-specific CSS will be provided by the model */
+  </style>
+  <script>
+    // Data from the application state
+    const data = {json_data};
+  </script>
+</head>
+<body>
+  <h2 id="visualization-title">Data Visualization</h2>
+  <div id="visualization-container">
+    <svg width="600" height="400"></svg>
+  </div>
+"""
 
-    // Define sample nodes and links.
+        # HTML footer template
+        html_footer = """
+</body>
+</html>"""
+
+        # Example D3.js code to show the model what we expect
+        example_d3_code = """
+  <script>
+    // The data is already available as a global 'data' variable
+    // You can access it directly with the 'data' variable
+    console.log("Data available:", data);
+    
+    // Select the SVG element and set dimensions
+    const svg = d3.select("svg");
+    const width = +svg.attr("width");
+    const height = +svg.attr("height");
+
+    // Add necessary CSS styles for this specific visualization
+    const style = document.createElement('style');
+    style.textContent = `
+      .link { 
+        stroke: #999; 
+        stroke-opacity: 0.6; 
+      }
+      .node { 
+        stroke: #fff; 
+        stroke-width: 1.5px; 
+      }
+    `;
+    document.head.appendChild(style);
+
+    // Example visualization code for a force-directed graph
+    // You would adapt this to your specific data and requirements
     const nodes = [
-      {id: \"A\"}, {id: \"B\"}, {id: \"C\"}, {id: \"D\"}, {id: \"E\"}
+      {id: "A"}, {id: "B"}, {id: "C"}, {id: "D"}, {id: "E"}
     ];
     const links = [
-      {source: \"A\", target: \"B\"},
-      {source: \"A\", target: \"C\"},
-      {source: \"B\", target: \"D\"},
-      {source: \"C\", target: \"D\"},
-      {source: \"D\", target: \"E\"}
+      {source: "A", target: "B"},
+      {source: "A", target: "C"},
+      {source: "B", target: "D"},
+      {source: "C", target: "D"},
+      {source: "D", target: "E"}
     ];
 
-    // Create a simulation with forces.
+    // Create a simulation with forces
     const simulation = d3.forceSimulation(nodes)
-                         .force(\"link\", d3.forceLink(links).id(d => d.id).distance(100))
-                         .force(\"charge\", d3.forceManyBody().strength(-300))
-                         .force(\"center\", d3.forceCenter(width / 2, height / 2));
+                       .force("link", d3.forceLink(links).id(d => d.id).distance(100))
+                       .force("charge", d3.forceManyBody().strength(-300))
+                       .force("center", d3.forceCenter(width / 2, height / 2));
 
-    // Create and style the links.
-    const link = svg.append(\"g\")
-                    .attr(\"class\", \"links\")
-                    .selectAll(\"line\")
-                    .data(links)
-                    .enter().append(\"line\")
-                    .attr(\"class\", \"link\")
-                    .attr(\"stroke-width\", 2);
+    // Create and style the links
+    const link = svg.append("g")
+                  .attr("class", "links")
+                  .selectAll("line")
+                  .data(links)
+                  .enter().append("line")
+                  .attr("class", "link")
+                  .attr("stroke-width", 2);
 
-    // Create and style the nodes.
-    const node = svg.append(\"g\")
-                    .attr(\"class\", \"nodes\")
-                    .selectAll(\"circle\")
-                    .data(nodes)
-                    .enter().append(\"circle\")
-                    .attr(\"class\", \"node\")
-                    .attr(\"r\", 10)
-                    .attr(\"fill\", \"steelblue\")
-                    .call(d3.drag()
-                        .on(\"start\", dragstarted)
-                        .on(\"drag\", dragged)
-                        .on(\"end\", dragended));
+    // Create and style the nodes
+    const node = svg.append("g")
+                  .attr("class", "nodes")
+                  .selectAll("circle")
+                  .data(nodes)
+                  .enter().append("circle")
+                  .attr("class", "node")
+                  .attr("r", 10)
+                  .attr("fill", "steelblue")
+                  .call(d3.drag()
+                      .on("start", dragstarted)
+                      .on("drag", dragged)
+                      .on("end", dragended));
 
-    // Add a tooltip to each node.
-    node.append(\"title\")
+    // Add a tooltip to each node
+    node.append("title")
         .text(d => d.id);
 
-    // Update positions on each tick of the simulation.
-    simulation.on(\"tick\", () => {
-      link.attr(\"x1\", d => d.source.x)
-          .attr(\"y1\", d => d.source.y)
-          .attr(\"x2\", d => d.target.x)
-          .attr(\"y2\", d => d.target.y);
+    // Update positions on each tick of the simulation
+    simulation.on("tick", () => {
+      link.attr("x1", d => d.source.x)
+          .attr("y1", d => d.source.y)
+          .attr("x2", d => d.target.x)
+          .attr("y2", d => d.target.y);
 
-      node.attr(\"cx\", d => d.x)
-          .attr(\"cy\", d => d.y);
+      node.attr("cx", d => d.x)
+          .attr("cy", d => d.y);
     });
 
-    // Define drag event functions.
+    // Define drag event functions
     function dragstarted(event, d) {
       if (!event.active) simulation.alphaTarget(0.3).restart();
       d.fx = d.x;
@@ -509,71 +605,62 @@ class GraphAgent:
       d.fx = null;
       d.fy = null;
     }
-  </script>"""
-        
+  </script>
+"""
 
+        # Create a more focused prompt that asks only for the D3.js code
         prompt = (
-            "You are an expert web developer specializing in interactive D3.js visualizations. "
-            "Generate only the <style> and <script> tags needed for a D3.js visualization based on the following specification: "
-            + query + " "
-            "For reference, here is an example showing both SVG and div-based visualizations: "
-            + sample_html + " "
-            "IMPORTANT: Your script must define an initViz() function that will be called after the DOM is ready. "
-            "All D3.js initialization and manipulation should happen inside this function. "
-            "The #visualization div will be empty when your code runs - your code needs to create any necessary elements. "
-            "Only output the <style> and <script> tags without any other HTML elements or markdown formatting."
-            "Here is the data at hand:" + str(state["data"])
+            "You are an expert D3.js developer specializing in interactive visualizations. "
+            "I already have the HTML boilerplate code with D3.js imported and an SVG element set up. "
+            "Generate ONLY the JavaScript code within <script> tags to create an interactive visualization based on the following specification: "
+            f"{query}\n\n"
+            "IMPORTANT: The data is already available as a global JavaScript variable named 'data'. "
+            "Here's a preview of the structure (actual data may contain more elements): \n" + 
+            json.dumps(data_preview, indent=2) + "\n\n"
+            "The HTML structure is already set up with:\n"
+            "- D3.js v6 imported\n"
+            "- Basic body styling and an SVG element with width 600px and height 400px\n"
+            "- The data already loaded and available as a global 'data' variable\n"
+            "- NO visualization-specific CSS - YOU MUST include any necessary CSS for your visualization\n\n"
+            "IMPORTANT: You must include any visualization-specific CSS within your script by either:\n"
+            "1. Adding a <style> element to the document head, or\n"
+            "2. Setting inline styles on the SVG elements\n\n"
+            "For reference, here is an example of D3.js code with CSS handling for a Force-Directed Graph: "
+            f"{example_d3_code}\n\n"
+            "Output ONLY the <script> element with your visualization code. Do not include DOCTYPE, HTML, head, or body tags."
         )
+        
         try:
-            print("Generating style and script code for visualization")
-            # Get response from ChatOpenAI
+            print("Generating visualization code...")
+            
+            # Get response from Claude
             response = self.claude_llm.invoke(prompt)
-            # Extract content from the response
-            code = response.content
-            # Remove markdown formatting if present
-            if code.startswith("```html"):
-                code = code[7:-3]  # Remove ```html and ``` markers
-            elif code.startswith("```"):
-                code = code[3:-3]  # Remove ``` markers
-                
+            visualization_code = response.content
+            
+            # Extract just the script content if it's wrapped in markdown or other tags
+            if "```" in visualization_code:
+                # Extract content from code blocks
+                import re
+                script_blocks = re.findall(r'```(?:html|javascript)?(.*?)```', visualization_code, re.DOTALL)
+                if script_blocks:
+                    visualization_code = '\n'.join(script_blocks)
+            
+            # Ensure the code has script tags
+            if "<script>" not in visualization_code:
+                visualization_code = f"<script>\n{visualization_code}\n</script>"
+            
+            # Combine the template parts with the generated visualization code
+            complete_html = html_header + visualization_code + html_footer
+            
             # Print the generated code for debugging
-            print("\nGenerated Style and Script Code:")
+            print("\nGenerated Visualization Code:")
+            print("=" * 50)
+            print(complete_html)
             print("=" * 50)
 
-            print("=" * 50)
-            
-            # Wrap the style and script tags in a basic HTML structure
-            html_code = f"""<!DOCTYPE html>
-            <html lang="en">
-            <head>
-            <meta charset="UTF-8">
-            <title>D3.js Visualization</title>
-            <script src="https://d3js.org/d3.v6.min.js"></script>
-            {code}
-            </head>
-            <body>
-            <div id="visualization">
-            </div>
-            <script>
-                // Wait for DOM to be ready
-                document.addEventListener('DOMContentLoaded', function() {{
-                    // Initialize D3 visualization after DOM is ready
-                    if (typeof initViz === 'function') {{
-                        initViz();
-                    }}
-                }});
-            </script>
-            </body>
-            </html>"""
-             # Print the generated code for debugging
-            print("\nGenerated Style and Script Code:")
-            print("=" * 50)
-            print(html_code)
-            print("=" * 50)
-
-            encoded_html = base64.b64encode(html_code.encode('utf-8')).decode('utf-8')
+            # Encode the HTML and create iframe
+            encoded_html = base64.b64encode(complete_html.encode('utf-8')).decode('utf-8')
             data_url = f"data:text/html;base64,{encoded_html}"
-            
             iframe_html = f'<iframe src="{data_url}" width="620" height="420" frameborder="0"></iframe>'
             
             return Command(
@@ -584,7 +671,12 @@ class GraphAgent:
             )
         except Exception as e:
             print(f"Error generating visualization: {str(e)}")
-            return "<p>Error generating visualization. Please try again.</p>"
+            return Command(
+                update={
+                    "iframe_html": gr.HTML(value="<p>Error generating visualization. Please try again.</p>"),
+                    "messages": [ToolMessage(f"Error generating visualization: {str(e)}", tool_call_id=tool_call_id)]
+                }
+            )
 
     def query_graph(self, query: str):
         """Execute a graph query using the appropriate tool."""
