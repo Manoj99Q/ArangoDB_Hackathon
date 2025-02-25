@@ -153,23 +153,60 @@ class GraphAgent:
             }
         )
 
-    def text_to_nx_algorithm_to_text(self, query: str,tool_call_id: str,name: str):
+    def text_to_nx_algorithm_to_text(self, query: str, tool_call_id: str, name: str):
         """This tool executes NetworkX algorithms based on natural language queries."""
         if self.networkx_graph is None:
             return "Error: NetworkX graph is not initialized"
-            
-        print("Netwrokx Query received:")
+        
+        # Get graph size info
+        num_nodes = len(self.networkx_graph.nodes())
+        num_edges = len(self.networkx_graph.edges())
+        
+        print("NetworkX Query received:")
         print(query)
         print("-"*10)
         print("1) Generating NetworkX code")
-        text_to_nx = self.llm.invoke(f"""
-        I have a NetworkX Graph called `G_adb`. It is a undirected weighted graph. It has the following schema: {self.arango_graph.schema}
+        
+        # Create parts of the prompt separately to handle the braces properly
+        example_code = '''
+            import networkx as nx
+
+            # Use fast Louvain method for community detection
+            communities = nx.community.louvain_communities(G_adb)
+
+            # Find the largest community
+            largest_community = max(communities, key=len)
+
+            # Get relevant data
+            largest_community_data = [G_adb.nodes[node] for node in largest_community]
+
+            FINAL_RESULT = {
+                'num_communities': len(communities),
+                'largest_community_size': len(largest_community),
+                'largest_community_data': largest_community_data[:10]  # Limit sample size for large communities
+            }
+            '''
+        
+        # Build the prompt with proper escaping of schema
+        schema_str = str(self.arango_graph.schema).replace("{", "{{").replace("}", "}}")
+        
+        prompt = f"""
+        I have a NetworkX Graph called `G_adb`. It is an undirected weighted graph with {num_nodes} nodes and {num_edges} edges. It has the following schema: {schema_str}
 
         I have the following graph analysis query: {query}.
 
         Generate the Python Code required to answer the query using the `G_adb` object.
+        
+        IMPORTANT PERFORMANCE CONSIDERATIONS:
+        - This is a LARGE graph with over 14,000 nodes - algorithm selection is critical
+        - For community detection, use ONLY fast algorithms like Louvain (nx.community.louvain_communities) or Label Propagation (nx.community.label_propagation_communities)
+        - NEVER use Girvan-Newman algorithm as it's too slow for this graph
+        - For centrality, prefer approximation methods where available
+        - Limit any expensive computations to relevant subgraphs when possible
+        - Consider node/edge sampling for visualization or complex algorithms
+        
         Be very precise on the NetworkX algorithm you select to answer this query.
-        Think step by step.
+        Think step by step about both correctness AND performance.
 
         Only assume that networkx is installed, and other base python dependencies.
         Always set the last variable as `FINAL_RESULT`, which represents the answer to the original query.
@@ -177,25 +214,23 @@ class GraphAgent:
         Make sure that `FINAL_RESULT` stores all the information for example a list of nodes, edges, etc.
         Make sure that `FINAL_RESULT` contains not just the ID but the actual node/edge object with all the properties.
 
-        Example:
-        Question:Perform PageRank analysis on the SteamGraph to identify the most influential game based on user-game interactions
-        # Assuming G_adb is already defined and is a NetworkX Graph object
-        import networkx as nx
-
-        # Perform PageRank analysis
-        pagerank_scores = nx.pagerank(G_adb, weight='weight')
-
-        # Find the most influential game based on PageRank scores
-        # Since the graph is undirected, we need to filter out the game nodes
-        game_nodes = [node for node, data in G_adb.nodes(data=True) if data.get('type') == 'Games']
-
-        # Get the game with the highest PageRank score
-        most_influential_game = max(game_nodes, key=lambda node: pagerank_scores.get(node, 0))
-
-        # Retrieve the node data for the most influential game
-        FINAL_RESULT = G_adb.nodes[most_influential_game]
+        Example of GOOD code for community detection:
+        ```python
+            {example_code}
+        ```
+        
         Your code:
-        """).content
+        """
+        
+        try:
+            text_to_nx = self.llm.invoke(prompt).content
+        except Exception as e:
+            print(f"Error in LLM invocation: {e}")
+            return Command(
+                update={
+                    "messages": [ToolMessage(f"Error generating NetworkX code: {str(e)}", tool_call_id=tool_call_id)]
+                }
+            )
 
         text_to_nx_cleaned = re.sub(r"^```python\n|```$", "", text_to_nx, flags=re.MULTILINE).strip()
         
@@ -574,32 +609,32 @@ class GraphAgent:
         
         # HTML header template with D3.js import, minimal styling, and embedded data
         html_header = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>D3.js Visualization</title>
-  <script src="https://d3js.org/d3.v6.min.js"></script>
-  <style>
-    body {{ font: 14px sans-serif; margin: 20px; }}
-    svg {{ border: 1px solid #ccc; }}
-    /* The visualization-specific CSS will be provided by the model */
-  </style>
-  <script>
-    // Data from the application state
-    const data = {json_data};
-  </script>
-</head>
-<body>
-  <h2 id="visualization-title">Data Visualization</h2>
-  <div id="visualization-container">
-    <svg width="1200" height="800"></svg>
-  </div>
-"""
+            <html lang="en">
+            <head>
+            <meta charset="UTF-8">
+            <title>D3.js Visualization</title>
+            <script src="https://d3js.org/d3.v6.min.js"></script>
+            <style>
+                body {{ font: 14px sans-serif; margin: 20px; }}
+                svg {{ border: 1px solid #ccc; }}
+                /* The visualization-specific CSS will be provided by the model */
+            </style>
+            <script>
+                // Data from the application state
+                const data = {json_data};
+            </script>
+            </head>
+            <body>
+            <h2 id="visualization-title">Data Visualization</h2>
+            <div id="visualization-container">
+                <svg width="1200" height="800"></svg>
+            </div>
+            """
 
         # HTML footer template
         html_footer = """
-</body>
-</html>"""
+        </body>
+        </html>"""
 
         # Example D3.js code to show the model what we expect
         example_d3_code = """
@@ -622,7 +657,18 @@ class GraphAgent:
       }
       .node { 
         stroke: #fff; 
-        stroke-width: 1.5px; 
+        stroke-width: 1.5px;
+        transition: r 0.2s, fill 0.2s;
+      }
+      .node:hover {
+        fill: #ff7700;
+        cursor: pointer;
+      }
+      .node-label {
+        font-size: 12px;
+        font-weight: bold;
+        text-anchor: middle;
+        pointer-events: none;
       }
     `;
     document.head.appendChild(style);
@@ -667,11 +713,31 @@ class GraphAgent:
                   .call(d3.drag()
                       .on("start", dragstarted)
                       .on("drag", dragged)
-                      .on("end", dragended));
+                      .on("end", dragended))
+                  .on("mouseover", function(event, d) {
+                    d3.select(this)
+                      .attr("r", 15)
+                      .attr("fill", "#ff7700");
+                  })
+                  .on("mouseout", function(event, d) {
+                    d3.select(this)
+                      .attr("r", 10)
+                      .attr("fill", "steelblue");
+                  });
 
     // Add a tooltip to each node
     node.append("title")
         .text(d => d.id);
+        
+    // Add text labels for nodes
+    const labels = svg.append("g")
+                  .attr("class", "labels")
+                  .selectAll("text")
+                  .data(nodes)
+                  .enter().append("text")
+                  .attr("class", "node-label")
+                  .attr("dy", -15)  // Position above the node
+                  .text(d => d.id);
 
     // Update positions on each tick of the simulation
     simulation.on("tick", () => {
@@ -682,6 +748,9 @@ class GraphAgent:
 
       node.attr("cx", d => d.x)
           .attr("cy", d => d.y);
+          
+      labels.attr("x", d => d.x)
+            .attr("y", d => d.y);
     });
 
     // Define drag event functions
@@ -722,6 +791,7 @@ class GraphAgent:
             "For reference, here is an example of D3.js code with CSS handling for a Force-Directed Graph: "
             f"{example_d3_code}\n\n"
             "Output ONLY the <script> element with your visualization code. Do not include DOCTYPE, HTML, head, or body tags."
+            "And if the task is simple you can amp it up with effects and animations only if you are confident without errors or else just keep it simple"
         )
         
         # Log the prompt for verification
