@@ -5,223 +5,161 @@
   <title>D3.js Visualization</title>
   <script src="https://d3js.org/d3.v6.min.js"></script>
   <style>
-    body { font: 14px sans-serif; margin: 20px; }
-    svg { border: 1px solid #ccc; }
-    /* The visualization-specific CSS will be provided by the model */
+    body { font: 14px sans-serif; margin: 0; padding: 0; }
+    #visualization-container { width: 100%; height: 100%; }
+    svg {width: 100%; height: 600px; border: 1px solid #ccc; }
+
   </style>
+  <script>
+    // Data from the application state
+    const data = [{"most_influential_game": [{"game": {"_key": "11371_dota_2", "_id": "Games/11371_dota_2", "_rev": "_jPaYcPq--B", "type": "Games", "GameName": "Dota 2"}, "userCount": 4841}]}, {"top_5_users": []}];
+  </script>
 </head>
 <body>
   <h2 id="visualization-title">Data Visualization</h2>
   <div id="visualization-container">
-    <svg width="600" height="400"></svg>
+    <svg></svg>
   </div>
 <script>
-    data = [ { 'Games/11359_team_fortress_2': { 'GameName': 'Team Fortress 2',
-                                               '_id': 'Games/11359_team_fortress_2',
-                                               '_key': '11359_team_fortress_2',
-                                               '_rev': '_jPaYcPm--H',
-                                               'type': 'Games'}},
-            { 'Games/11371_dota_2': { 'GameName': 'Dota 2',
-                                      '_id': 'Games/11371_dota_2',
-                                      '_key': '11371_dota_2',
-                                      '_rev': '_jPaYcPq--B',
-                                      'type': 'Games'}},
-            { 'team_fortress_2_users': [ { '_id': 'Users/151603712',
-                                           '_key': '151603712',
-                                           '_rev': '_jPaYbhm---',
-                                           'steamid': 151603712,
-                                           'type': 'Users'},
-                                         { '_id': 'Users/59945701',
-                                           '_key': '59945701',
-                                           '_rev': '_jPaYbhm--A',
-                                           'steamid': 59945701,
-                                           'type': 'Users'},
-                                         { '_id': 'Users/140954425',
-                                           '_key': '140954425',
-                                           '_rev': '_jPaYbhm--C',
-                                           'steamid': 140954425,
-                                           'type': 'Users'},
-                                         { '_id': 'Users/150128162',
-                                           '_key': '150128162',
-                                           '_rev': '_jPaYbhm--G',
-                                           'steamid': 150128162,
-                                           'type': 'Users'},
-                                         { '_id': 'Users/297811211',
-                                           '_key': '297811211',
-                                           '_rev': '_jPaYbhm--J',
-                                           'steamid': 297811211,
-                                           'type': 'Users'},
-                                         { '_id': 'Users/126340495',
-                                           '_key': '126340495',
-                                           '_rev': '_jPaYbhm--N',
-                                           'steamid': 126340495,
-                                           'type': 'Users'},
-                                         { '_id': 'Users/254906420',
-                                           '_key': '254906420',
-                                           '_rev': '_jPaYbhm--U',
-                                           'steamid': 254906420,
-                                           'type': 'Users'},
-                                         { '_id': 'Users/97298878',
-                                           '_key': '97298878',
-                                           '_rev': '_jPaYbhm--Y',
-                                           'steamid': 97298878,
-                                           'type': 'Users'},
-                                         { '_id': 'Users/99189757',
-                                           '_key': '99189757',
-                                           '_rev': '_jPaYbhm--g',
-                                           'steamid': 99189757,
-                                           'type': 'Users'},
-                                         { '_id': 'Users/226212066',
-                                           '_key': '226212066',
-                                           '_rev': '_jPaYbhm--l',
-                                           'steamid': 226212066,
-                                           'type': 'Users'}]},
-            { 'dota_2_users': [ { '_id': 'Users/151603712',
-                                  '_key': '151603712',
-                                  '_rev': '_jPaYbhm---',
-                                  'steamid': 151603712,
-                                  'type': 'Users'},
-                                { '_id': 'Users/187131847',
-                                  '_key': '187131847',
-                                  '_rev': '_jPaYbhm--_',
-                                  'steamid': 187131847,
-                                  'type': 'Users'},
-                                { '_id': 'Users/176410694',
-                                  '_key': '176410694',
-                                  '_rev': '_jPaYbhm--E',
-                                  'steamid': 176410694,
-                                  'type': 'Users'},
-                                { '_id': 'Users/197278511',
-                                  '_key': '197278511',
-                                  '_rev': '_jPaYbhm--F',
-                                  'steamid': 197278511,
-                                  'type': 'Users'},
-                                { '_id': 'Users/197455089',
-                                  '_key': '197455089',
-                                  '_rev': '_jPaYbhm--H',
-                                  'steamid': 197455089,
-                                  'type': 'Users'},
-                                { '_id': 'Users/218323237',
-                                  '_key': '218323237',
-                                  '_rev': '_jPaYbhm--L',
-                                  'steamid': 218323237,
-                                  'type': 'Users'},
-                                { '_id': 'Users/302186258',
-                                  '_key': '302186258',
-                                  '_rev': '_jPaYbhm--M',
-                                  'steamid': 302186258,
-                                  'type': 'Users'},
-                                { '_id': 'Users/126340495',
-                                  '_key': '126340495',
-                                  '_rev': '_jPaYbhm--N',
-                                  'steamid': 126340495,
-                                  'type': 'Users'},
-                                { '_id': 'Users/194895541',
-                                  '_key': '194895541',
-                                  '_rev': '_jPaYbhm--O',
-                                  'steamid': 194895541,
-                                  'type': 'Users'},
-                                { '_id': 'Users/170625356',
-                                  '_key': '170625356',
-                                  '_rev': '_jPaYbhm--P',
-                                  'steamid': 170625356,
-                                  'type': 'Users'}]}];
-  // Extract user lists from the data
-  const tf2Users = new Set(data[2].team_fortress_2_users.map(u => u.steamid));
-  const dota2Users = new Set(data[3].dota_2_users.map(u => u.steamid));
-  
-  // Calculate intersection
-  const commonUsers = [...tf2Users].filter(x => dota2Users.has(x));
-
-  // Set up the SVG
-  const svg = d3.select("svg");
-  const width = +svg.attr("width");
-  const height = +svg.attr("height");
-  
-  // Add CSS styles
+  // Add visualization-specific CSS
   const style = document.createElement('style');
   style.textContent = `
-    .venn-circle {
-      fill-opacity: 0.3;
-      stroke: #333;
+    .game-node {
+      fill: #4a90e2;
+      stroke: #2171c7;
       stroke-width: 2px;
     }
-    .venn-label {
-      font-family: Arial, sans-serif;
-      font-size: 14px;
-      font-weight: bold;
+    .user-node {
+      fill: #e2844a;
+      stroke: #c75721;
+      stroke-width: 2px;
     }
-    .common-user {
+    .node-label {
+      font-family: Arial, sans-serif;
       font-size: 12px;
-      fill: #333;
+      text-anchor: middle;
+    }
+    .connection-line {
+      stroke: #999;
+      stroke-opacity: 0.6;
+      stroke-width: 1px;
+      stroke-dasharray: 3,3;
     }
   `;
   document.head.appendChild(style);
 
-  // Define circle properties
-  const circles = [
-    { name: "Team Fortress 2", x: width/3, y: height/2, r: 120, color: "#FF4C4C" },
-    { name: "Dota 2", x: (width*2)/3, y: height/2, r: 120, color: "#4CAF50" }
+  // Select SVG and get dimensions
+  const svg = d3.select("svg");
+  const width = +svg.attr("width");
+  const height = +svg.attr("height");
+
+  // Create container group with zoom capability
+  const g = svg.append("g");
+  svg.call(d3.zoom()
+    .extent([[0, 0], [width, height]])
+    .scaleExtent([0.5, 5])
+    .on("zoom", (event) => g.attr("transform", event.transform)));
+
+  // Extract game data
+  const gameData = data[0].most_influential_game[0];
+  const gameName = gameData.game.GameName;
+  const userCount = gameData.userCount;
+
+  // Create nodes data structure
+  const nodes = [
+    { id: "game", label: `${gameName}\n(${userCount} users)`, type: "game" },
+    { id: "user1", label: "User Placeholder 1", type: "user" },
+    { id: "user2", label: "User Placeholder 2", type: "user" },
+    { id: "user3", label: "User Placeholder 3", type: "user" },
+    { id: "user4", label: "User Placeholder 4", type: "user" },
+    { id: "user5", label: "User Placeholder 5", type: "user" }
   ];
 
-  // Draw the circles
-  svg.selectAll("circle")
-    .data(circles)
-    .enter()
-    .append("circle")
-    .attr("cx", d => d.x)
-    .attr("cy", d => d.y)
-    .attr("r", d => d.r)
-    .attr("class", "venn-circle")
-    .style("fill", d => d.color);
+  // Create links data structure
+  const links = nodes.slice(1).map(node => ({
+    source: "game",
+    target: node.id
+  }));
 
-  // Add game labels
-  svg.selectAll(".venn-label")
-    .data(circles)
-    .enter()
-    .append("text")
-    .attr("class", "venn-label")
-    .attr("x", d => d.x)
-    .attr("y", d => d.y - d.r - 10)
-    .attr("text-anchor", "middle")
-    .text(d => d.name);
+  // Create force simulation
+  const simulation = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id(d => d.id).distance(100))
+    .force("charge", d3.forceManyBody().strength(-500))
+    .force("center", d3.forceCenter(width / 2, height / 2));
 
-  // Add common users in the intersection
-  const intersectionX = width/2;
-  const intersectionY = height/2;
+  // Draw links
+  const link = g.append("g")
+    .selectAll("line")
+    .data(links)
+    .join("line")
+    .attr("class", "connection-line");
 
-  svg.selectAll(".common-user")
-    .data(commonUsers)
-    .enter()
-    .append("text")
-    .attr("class", "common-user")
-    .attr("x", intersectionX)
-    .attr("y", (d, i) => intersectionY - 10 + i * 20)
-    .attr("text-anchor", "middle")
-    .text(d => `User: ${d}`);
+  // Draw nodes
+  const node = g.append("g")
+    .selectAll("circle")
+    .data(nodes)
+    .join("circle")
+    .attr("class", d => d.type === "game" ? "game-node" : "user-node")
+    .attr("r", d => d.type === "game" ? 40 : 20)
+    .call(d3.drag()
+      .on("start", dragstarted)
+      .on("drag", dragged)
+      .on("end", dragended));
 
-  // Add intersection label
-  svg.append("text")
-    .attr("x", intersectionX)
-    .attr("y", intersectionY - 40)
-    .attr("text-anchor", "middle")
-    .attr("class", "venn-label")
-    .text("Common Users");
-
-  // Add hover interactions
-  svg.selectAll("circle")
-    .on("mouseover", function() {
-      d3.select(this)
-        .transition()
-        .duration(200)
-        .style("fill-opacity", 0.5);
-    })
-    .on("mouseout", function() {
-      d3.select(this)
-        .transition()
-        .duration(200)
-        .style("fill-opacity", 0.3);
+  // Add labels
+  const label = g.append("g")
+    .selectAll("text")
+    .data(nodes)
+    .join("text")
+    .attr("class", "node-label")
+    .attr("dy", ".35em")
+    .text(d => d.label)
+    .each(function(d) {
+      if (d.type === "game") {
+        const lines = d.label.split('\n');
+        d3.select(this).selectAll('tspan')
+          .data(lines)
+          .join('tspan')
+          .attr('x', 0)
+          .attr('dy', (_, i) => i === 0 ? 0 : '1.2em')
+          .text(line => line);
+      }
     });
+
+  // Update positions on simulation tick
+  simulation.on("tick", () => {
+    link
+      .attr("x1", d => d.source.x)
+      .attr("y1", d => d.source.y)
+      .attr("x2", d => d.target.x)
+      .attr("y2", d => d.target.y);
+
+    node
+      .attr("cx", d => d.x)
+      .attr("cy", d => d.y);
+
+    label
+      .attr("x", d => d.x)
+      .attr("y", d => d.y);
+  });
+
+  // Drag functions
+  function dragstarted(event, d) {
+    if (!event.active) simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+  }
+
+  function dragged(event, d) {
+    d.fx = event.x;
+    d.fy = event.y;
+  }
+
+  function dragended(event, d) {
+    if (!event.active) simulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+  }
 </script>
 </body>
 </html>

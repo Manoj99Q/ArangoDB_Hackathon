@@ -73,15 +73,15 @@ class GraphAgent:
         display(Image(self.agent.get_graph(xray=True).draw_mermaid_png()))
 
 
-    def text_to_aql_to_text(self, query: str,tool_call_id: str, var_name: str):
+    def text_to_aql_to_text(self, query: str, tool_call_id: str, var_name: str, state):
         """This tool is available to invoke the
         ArangoGraphQAChain object, which enables you to
         translate a Natural Language Query into AQL, execute
         the query, and translate the result back into Natural Language.
-        """
-
         
-
+        The function can now use injected data from the state variables in the query execution.
+        """
+        
         chain = ArangoGraphQAChain.from_llm(
             llm=self.llm,
             graph=self.arango_graph,
@@ -103,15 +103,49 @@ class GraphAgent:
             LIMIT 1 
             RETURN {game, playerCount: playerCount}
             """
-
         )
         
-        result = chain.invoke(query+ " \n  Important: if returning a node always return the node object with all the properties")
-
+        # Enhanced query with state information if state exists
+        enhanced_query = query
+        if state and "data" in state and state["data"]:
+            # Create a preview of the state data
+            data_preview = [self.create_data_preview(item) for item in state["data"]]
+            
+            # Add state context to the query
+            state_context = "Consider the following data in your query context:\n"
+            state_context += json.dumps(data_preview, indent=2)
+            enhanced_query = state_context + "\n\n" + query
+        
+        print("enhanced query")
+        print(enhanced_query)
+        
+        result = chain.invoke(enhanced_query + " \n  Important: if returning a node always return the node object with all the properties")
+        
+        # If AQL query is available and state exists, try to use state data as bind variables
+        aql_query = result.get("aql_query", "")
+        if aql_query and state and "data" in state and state["data"]:
+            try:
+                # Create bind variables from state data (flattening complex structures)
+                bind_vars = {}
+                
+                # Extract simple key-value pairs from data items for bind variables
+                for item in state["data"]:
+                    if isinstance(item, dict):
+                        for k, v in item.items():
+                            # Only use simple types as bind variables
+                            if isinstance(v, (str, int, float, bool)):
+                                bind_vars[str(k)] = v
+                
+                if bind_vars:
+                    # Execute the AQL query with bind variables from state
+                    cursor = self.arango_graph.db.aql.execute(aql_query, bind_vars=bind_vars)
+                    result["aql_result"] = [doc for doc in cursor]
+            except Exception as e:
+                print(f"Error executing AQL with state variables: {str(e)}")
+        
         print("print AQL tool result")
         print(result)
-        # return str(result["result"])
-
+        
         return Command(
             update={
                 "data": {var_name: result["aql_result"]},
@@ -254,14 +288,19 @@ class GraphAgent:
     def _create_RAG_tools(self):
         """Tools for data processing stage"""
         @tool
-        def AQL_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: Annotated[str, "Natural Language Query"],name: Annotated[str, "Name of the variable to store the result; dont use generic names"]):
+        def AQL_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], 
+                            query: Annotated[str, "Natural Language Query"],
+                            name: Annotated[str, "Name of the variable to store the result; dont use generic names"],
+                            state: Annotated[dict, InjectedState] = None):
             """This tool is available to invoke the
             ArangoGraphQAChain object, which enables you to
             translate a Natural Language Query into AQL, execute
             the query and get the result.
+            
+            It now has access to the current state for context-aware queries.
             """
             try:
-                return self.text_to_aql_to_text(query,tool_call_id=tool_call_id, var_name=name)
+                return self.text_to_aql_to_text(query, tool_call_id=tool_call_id, var_name=name, state=state)
             except Exception as e:
                 return f"Error: {e}"
             
@@ -363,7 +402,7 @@ class GraphAgent:
         last_msg = state["messages"][-1]
         return hasattr(last_msg, 'tool_calls') and bool(last_msg.tool_calls)
 
-    def create_data_preview(self, data, max_items=2, current_depth=0, max_depth=5):
+    def create_data_preview(self, data, max_items=2, current_depth=0, max_depth=7):
         """Create a compact preview of data structures for prompts"""
         if current_depth > max_depth:
             return "..."
@@ -485,7 +524,7 @@ class GraphAgent:
                         - Generate Only One graph for the whole
                         - Come up with different visualizations based on the data and the query
                         - Example: a bar chart for number of hours played by each user or number users a game has been played by 
-                         -Use graph type charts when you have edge type and node type  data"""
+                         -Example: Use graph type charts whenever you can based on the data at hand like a games and its users and the node size should be based on some metric"""
         
         # Don't embed JSON directly in the prompt to avoid template variable confusion
         user_prompt = f"Visualize for: {state['user_query']}"
@@ -553,7 +592,7 @@ class GraphAgent:
 <body>
   <h2 id="visualization-title">Data Visualization</h2>
   <div id="visualization-container">
-    <svg width="600" height="400"></svg>
+    <svg width="1200" height="800"></svg>
   </div>
 """
 
@@ -758,7 +797,7 @@ class GraphAgent:
         """Execute a graph query using the appropriate tool."""
         initial_state = {
             "messages": [HumanMessage(content=query)],
-            # "vis_messages": [HumanMessage(content=query)],
+            "RAG_reply": "",
             "user_query": query,
             "data": [],  # Initialize empty data list
             "iframe_html": "",  # Initialize empty iframe
