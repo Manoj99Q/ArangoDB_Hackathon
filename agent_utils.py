@@ -20,6 +20,7 @@ from IPython.display import Image, display
 from langgraph.prebuilt import InjectedState
 from pprint import pprint
 import gradio as gr
+import json
 # Load environment variables
 load_dotenv()
 
@@ -362,42 +363,91 @@ class GraphAgent:
         last_msg = state["messages"][-1]
         return hasattr(last_msg, 'tool_calls') and bool(last_msg.tool_calls)
 
+    def create_data_preview(self, data, max_items=2, current_depth=0, max_depth=5):
+        """Create a compact preview of data structures for prompts"""
+        if current_depth > max_depth:
+            return "..."
+        
+        # Handle NetworkX node data (tuple format)
+        if isinstance(data, tuple) and len(data) == 2:
+            node_id, attributes = data
+            return {
+                "node_id": node_id,
+                "attributes": self.create_data_preview(attributes, max_items, current_depth+1, max_depth)
+            }
+            
+        # Handle NetworkX NodeAttrDict
+        if hasattr(data, 'items'):
+            return {str(k): self.create_data_preview(v, max_items, current_depth+1, max_depth) 
+                    for k, v in data.items()}
+
+        if isinstance(data, list):
+            if not data:
+                return []
+            sample = data[:min(max_items, len(data))]
+            preview = [self.create_data_preview(item, max_items, current_depth+1, max_depth) for item in sample]
+            if len(data) > max_items:
+                preview.append(f"... ({len(data) - max_items} more items)")
+            return preview
+            
+        elif isinstance(data, dict):
+            return {str(k): self.create_data_preview(v, max_items, current_depth+1, max_depth) 
+                    for k, v in data.items()}
+                    
+        # Handle other non-serializable types
+        try:
+            json.dumps(data)
+            return data
+        except TypeError:
+            return str(data)
+
     def RAG(self, state: GraphState):
         """RAG Step to generate a plan for the query and execute it to get the results"""
 
         print("\nProcessing Agent State:")
         pprint(state, indent=2, width=80)
 
+        # Create a preview for the data in the prompt
+        data_preview = [self.create_data_preview(item) for item in state.get("data", [])]
         
         plan_prompt = """SYSTEM: You are a Graph Analysis Planner. Follow these steps:
-                1. Analyze the user's query
-                2. Create a step-by-step plan using available tools
-                3. Execute tools sequentially using previous results
-                4. Always break the query into smaller parts and use the tools accordingly
+                1. Analyze the user's query for batch processing opportunities
+                2. Create optimized steps using available tools
+                3. Prefer single comprehensive queries over multiple small ones
+                4. Use aggregation and grouping where possible
                 5. Combine results for final answer
 
                 Rules:
-                → Create a plan before tool usage
-                → Use one tool per step
-                → Reference previous results where needed
+                → Look for ways to handle multiple items in one tool call
+                → Use summary statistics (sums, counts) in queries
+                → Retrieve related data in single queries when possible
+                → Handle top N results within the same query
 
+               
                 Graph Schema:
                 {schema}
-                Current Data at hand (This data will be updated as you use the tools):
-                {data}
+                Current Data at hand:
+                {data_preview}
                 Current Query: {user_query}
 
                 YOUR PLAN:
                 1."""
 
+        # Log the prompt for verification
+        filled_prompt = plan_prompt.format(
+            schema=self.arango_graph.schema,
+            data_preview=json.dumps(data_preview, indent=2),
+            user_query=state["user_query"]
+        )
+        print("\n==== RAG PROMPT ====")
+        print(filled_prompt)
+        print("==== END RAG PROMPT ====\n")
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", plan_prompt),
             ("placeholder", "{messages}"),
-
         ])
 
-
-                
         chain = (
             prompt 
             | self.llm.bind_tools(
@@ -406,8 +456,13 @@ class GraphAgent:
             )
         )
         
-         # 1) Invoke the chain on the user query
-        new_ai_message = chain.invoke({**state,**{"schema":self.arango_graph.schema}})
+        # 1) Invoke the chain on the user query
+        new_ai_message = chain.invoke({
+            **state,
+            "schema": self.arango_graph.schema,
+            "data_preview": json.dumps(data_preview, indent=2),
+            "user_query": state["user_query"]
+        })
 
         # 2) Return updated messages by *appending* new_ai_message to the state
         return {
@@ -421,20 +476,40 @@ class GraphAgent:
         print("Visualizer State:")
         pprint(state, indent=2, width=80)
         
-
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a visualization expert. Create visual representations of the data. 
+        # Create a preview for the data in the prompt
+        data_preview = [self.create_data_preview(item) for item in state.get("data", [])]
+        data_preview_json = json.dumps(data_preview, indent=2)
+        
+        system_prompt = """You are a visualization expert. Create visual representations of the data. 
                          RULES:
                         - Generate Only One graph for the whole
                         - Come up with different visualizations based on the data and the query
                         - Example: a bar chart for number of hours played by each user or number users a game has been played by 
-                         -Use graph type charts when you have edge type and node type  data"""),
-            ("user", "Visualize for: {user_query}\n\n And the data at hand is: {data}\n\n"),
+                         -Use graph type charts when you have edge type and node type  data"""
+        
+        # Don't embed JSON directly in the prompt to avoid template variable confusion
+        user_prompt = f"Visualize for: {state['user_query']}"
+        
+        # Log the prompt for verification
+        print("\n==== VISUALIZER PROMPT ====")
+        print("SYSTEM: " + system_prompt)
+        print("\nUSER: " + user_prompt)
+        print("DATA: " + data_preview_json)
+        print("==== END VISUALIZER PROMPT ====\n")
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("user", f"{user_prompt}\n\nAnd the data at hand is: {{data_json}}"),
             ("placeholder", "{messages}")
         ])
         
-        chain = prompt | self.llm.bind_tools(self.visualization_tools,parallel_tool_calls=False,)
-        new_ai_message = chain.invoke(state)
+        chain = prompt | self.llm.bind_tools(self.visualization_tools, parallel_tool_calls=False)
+        
+        # Pass data_json as a separate variable to avoid template parsing issues
+        new_ai_message = chain.invoke({
+            **state,
+            "data_json": data_preview_json  # Pass as pre-formatted JSON string
+        })
 
         return {
             "messages": state["messages"] + [new_ai_message]
@@ -446,37 +521,17 @@ class GraphAgent:
         
         # Serialize the data to JSON for embedding in the HTML
         import json
-        json_data = json.dumps(state["data"])
+        try:
+            json_data = json.dumps(state["data"])
+        except TypeError as e:
+            print(f"Warning: JSON serialization issue: {e}")
+            print("Attempting to create serializable version of the data...")
+            # Create a serializable version if needed
+            safe_data = self.create_serializable_data(state["data"])
+            json_data = json.dumps(safe_data)
         
-        # Create a compact representation of the data structure for the prompt
-        def create_data_preview(data, max_items=2, current_depth=0, max_depth=3):
-            """Create a compact preview of data structures for the prompt"""
-            if current_depth > max_depth:
-                return "..."
-            
-            if isinstance(data, list):
-                # For lists, include only a sample of items
-                if not data:
-                    return []
-                sample = data[:min(max_items, len(data))]
-                preview = [create_data_preview(item, max_items, current_depth+1, max_depth) for item in sample]
-                if len(data) > max_items:
-                    preview.append(f"... ({len(data) - max_items} more items)")
-                return preview
-            
-            elif isinstance(data, dict):
-                # For dictionaries, include keys and structure
-                preview = {}
-                for key, value in data.items():
-                    preview[key] = create_data_preview(value, max_items, current_depth+1, max_depth)
-                return preview
-            
-            else:
-                # For primitive types, return as is
-                return data
-        
-        # Create a preview of the data for the prompt
-        data_preview = [create_data_preview(item) for item in state["data"]]
+        # Create a preview of the data for the prompt using the class method
+        data_preview = [self.create_data_preview(item) for item in state["data"]]
         
         # HTML header template with D3.js import, minimal styling, and embedded data
         html_header = f"""<!DOCTYPE html>
@@ -609,7 +664,7 @@ class GraphAgent:
 """
 
         # Create a more focused prompt that asks only for the D3.js code
-        prompt = (
+        visualization_prompt = (
             "You are an expert D3.js developer specializing in interactive visualizations. "
             "I already have the HTML boilerplate code with D3.js imported and an SVG element set up. "
             "Generate ONLY the JavaScript code within <script> tags to create an interactive visualization based on the following specification: "
@@ -630,11 +685,16 @@ class GraphAgent:
             "Output ONLY the <script> element with your visualization code. Do not include DOCTYPE, HTML, head, or body tags."
         )
         
+        # Log the prompt for verification
+        print("\n==== VISUALIZATION GENERATION PROMPT ====")
+        print(visualization_prompt)
+        print("==== END VISUALIZATION GENERATION PROMPT ====\n")
+        
         try:
             print("Generating visualization code...")
             
             # Get response from Claude
-            response = self.claude_llm.invoke(prompt)
+            response = self.claude_llm.invoke(visualization_prompt)
             visualization_code = response.content
             
             # Extract just the script content if it's wrapped in markdown or other tags
@@ -677,6 +737,22 @@ class GraphAgent:
                     "messages": [ToolMessage(f"Error generating visualization: {str(e)}", tool_call_id=tool_call_id)]
                 }
             )
+
+    def create_serializable_data(self, data):
+        """Create a fully JSON-serializable version of the data"""
+        if isinstance(data, list):
+            return [self.create_serializable_data(item) for item in data]
+        elif isinstance(data, dict):
+            return {str(k): self.create_serializable_data(v) for k, v in data.items()}
+        else:
+            # Handle non-serializable data
+            try:
+                # Test if it's directly serializable
+                json.dumps(data)
+                return data
+            except (TypeError, OverflowError):
+                # Convert to string if not serializable
+                return str(data)
 
     def query_graph(self, query: str):
         """Execute a graph query using the appropriate tool."""
