@@ -89,6 +89,7 @@ class GraphAgent:
             allow_dangerous_requests=True,
             return_aql_query=True,
             return_aql_result=True,
+            return_direct = True,
             aql_examples = """
             #Find the game that has been played by the most players
             WITH Games, plays
@@ -104,44 +105,14 @@ class GraphAgent:
             RETURN {game, playerCount: playerCount}
             """
         )
-        
-        # Enhanced query with state information if state exists
-        enhanced_query = query
-        if state and "data" in state and state["data"]:
-            # Create a preview of the state data
-            data_preview = [self.create_data_preview(item) for item in state["data"]]
-            
-            # Add state context to the query
-            state_context = "Consider the following data in your query context:\n"
-            state_context += json.dumps(data_preview, indent=2)
-            enhanced_query = state_context + "\n\n" + query
-        
-        print("enhanced query")
-        print(enhanced_query)
-        
-        result = chain.invoke(enhanced_query + " \n  Important: if returning a node always return the node object with all the properties")
-        
-        # If AQL query is available and state exists, try to use state data as bind variables
-        aql_query = result.get("aql_query", "")
-        if aql_query and state and "data" in state and state["data"]:
-            try:
-                # Create bind variables from state data (flattening complex structures)
-                bind_vars = {}
-                
-                # Extract simple key-value pairs from data items for bind variables
-                for item in state["data"]:
-                    if isinstance(item, dict):
-                        for k, v in item.items():
-                            # Only use simple types as bind variables
-                            if isinstance(v, (str, int, float, bool)):
-                                bind_vars[str(k)] = v
-                
-                if bind_vars:
-                    # Execute the AQL query with bind variables from state
-                    cursor = self.arango_graph.db.aql.execute(aql_query, bind_vars=bind_vars)
-                    result["aql_result"] = [doc for doc in cursor]
-            except Exception as e:
-                print(f"Error executing AQL with state variables: {str(e)}")
+        print("AQL tool query")
+        print(query)
+
+
+  
+        result = chain.invoke(query + " \n  Important: if returning a node always return the node object with all the properties and dont perform any llm processing on the result.I only need the direct aql result")
+        reply = "Query executed successfully and updated the state with the result"
+ 
         
         print("print AQL tool result")
         print(result)
@@ -149,7 +120,7 @@ class GraphAgent:
         return Command(
             update={
                 "data": {var_name: result["aql_result"]},
-                "messages": [ToolMessage(str(result["result"]), tool_call_id=tool_call_id)]
+                "messages": [ToolMessage(reply, tool_call_id=tool_call_id)]
             }
         )
 
@@ -332,7 +303,7 @@ class GraphAgent:
             translate a Natural Language Query into AQL, execute
             the query and get the result.
             
-            It now has access to the current state for context-aware queries.
+            Only pass natural language detailed instructions on what to do.
             """
             try:
                 return self.text_to_aql_to_text(query, tool_call_id=tool_call_id, var_name=name, state=state)
@@ -390,7 +361,7 @@ class GraphAgent:
         if last_message.tool_calls:
             return "RAG Tools"
         else:
-            return "Visualizer"
+            return "RAG_Summarizer"
         
     def should_continue_after_Vis(self, state: GraphState):
         messages = state["messages"]
@@ -407,6 +378,7 @@ class GraphAgent:
         # Add nodes
         builder.add_node("RAG", self.RAG)
         builder.add_node("RAG Tools", ToolNode(self.RAG_tools))
+        builder.add_node("RAG_Summarizer", self.RAG_Summarizer)  # Add the new intermediate node
         builder.add_node("Visualizer", self.Visualizer)
         builder.add_node("Vis Tools", ToolNode(self.visualization_tools))
         builder.add_edge("RAG Tools","RAG")
@@ -418,13 +390,15 @@ class GraphAgent:
         builder.add_conditional_edges(
             "RAG",
             self.should_continue_after_RAG,
-            ["RAG Tools", "Visualizer"]
-
+            ["RAG Tools", "RAG_Summarizer"]  # Changed Visualizer to RAG_Summarizer
         )
+        
+        # Add a direct edge from RAG_Summarizer to Visualizer
+        builder.add_edge("RAG_Summarizer", "Visualizer")
         
         builder.add_conditional_edges(
             "Visualizer",
-            self.should_continue_after_Vis  ,
+            self.should_continue_after_Vis,
             ["Vis Tools", END]
         )
 
@@ -543,7 +517,26 @@ class GraphAgent:
             "messages": state["messages"] + [new_ai_message]
         }
     
-    
+    def RAG_Summarizer(self, state: GraphState):
+        """Intermediate node that extracts the last message from RAG and updates the RAG_reply state variable."""
+        
+        print("\nRAG_Summarizer State:")
+        pprint(state, indent=2, width=80)
+        
+        # Extract the last message from the RAG node
+        messages = state["messages"]
+        last_message = messages[-1]
+        
+        # Update the RAG_reply state variable with the content of the last message
+        rag_reply = last_message.content if hasattr(last_message, 'content') else str(last_message)
+        
+        print("\nUpdating RAG_reply with:")
+        print(rag_reply)
+        
+        # Return updated state with the RAG_reply field updated
+        return {
+            "RAG_reply": rag_reply
+        }
     
     def Visualizer(self, state: GraphState):
         """Agent for visualization phase"""
@@ -882,7 +875,8 @@ class GraphAgent:
         # Return structured response
         return {
             "html_code": final_state["iframe_html"],
-            "reply": final_state["messages"][-1].content
+            "reply": final_state["messages"][-1].content,
+            "rag_reply": final_state["RAG_reply"]  # Include the RAG_reply in the response
         }
 
  

@@ -1,6 +1,14 @@
 total number of users in the graph
 common users between Team Fortress 2 and  Dota 2
+can u show the distribution of top 5 most played games by users and also by hours
 Find the  top 10 users who played a lot  and which games they have played is common most by hours
 top 5 users of top 3 games
+Users who have played the most influential game
+Find 2nd and 4th Most influential game in the graph and its number of users who played both of them
+the  top 3 user who played the most number of games and the games they played
+distribution of top 10 users by their playtime and also by their number of games
 
-do both data const and also individual key constas
+do both data const and also individual key constas - NOT NEEDED
+- one tool call only for visualizing the graph but can be combined graphs 
+or multiple plots and toolcalls
+new claude model
