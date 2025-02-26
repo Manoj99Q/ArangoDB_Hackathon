@@ -21,6 +21,7 @@ from langgraph.prebuilt import InjectedState
 from pprint import pprint
 import gradio as gr
 import json
+from ArangoGraphDirectChain import ArangoGraphDirectChain
 # Load environment variables
 load_dotenv()
 
@@ -82,7 +83,7 @@ class GraphAgent:
         The function can now use injected data from the state variables in the query execution.
         """
         
-        chain = ArangoGraphQAChain.from_llm(
+        chain = ArangoGraphDirectChain.from_llm(
             llm=self.llm,
             graph=self.arango_graph,
             verbose=True,
@@ -453,7 +454,7 @@ class GraphAgent:
         """RAG Step to generate a plan for the query and execute it to get the results"""
 
         print("\nProcessing Agent State:")
-        pprint(state, indent=2, width=80)
+        pprint(state["messages"], indent=2, width=80)
 
         # Create a preview for the data in the prompt
         data_preview = [self.create_data_preview(item) for item in state.get("data", [])]
@@ -470,6 +471,7 @@ class GraphAgent:
                 → Use summary statistics (sums, counts) in queries
                 → Retrieve related data in single queries when possible
                 → Handle top N results within the same query
+                → Also dont bother about visulization in the plan. There is another agent for that after this step.
 
                
                 Graph Schema:
