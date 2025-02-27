@@ -25,20 +25,18 @@ from ArangoGraphDirectChain import ArangoGraphDirectChain
 # Load environment variables
 load_dotenv()
 
-def add_data(old_data: list[dict[str, Any]], new_data: list[dict[str, Any]] | dict[str, Any]) -> list[dict[str, Any]]:
-    """Reducer to append new data to existing data list"""
+def add_data(old_data: dict[str, Any], new_data: dict[str, Any]) -> dict[str, Any]:
+    """Reducer to merge new data into existing data dictionary"""
     if old_data is None:
-        old_data = []
-    if isinstance(new_data, dict):
-        return [*old_data, new_data]
-    return [*old_data, *new_data]
+        old_data = {}
+    return {**old_data, **new_data}
 
 # Add State definition at the top with other imports
 class GraphState(TypedDict):
     """Represents the state of our graph workflow."""
     messages: Annotated[list[AnyMessage], add_messages]
     user_query: str  # To track the current query being processed
-    data: Annotated[list[dict[str, Any]], add_data]
+    data: Annotated[dict[str, Any], add_data]
     RAG_reply: str
     iframe_html: any
     # graph_schema: dict[str, Any]
@@ -458,7 +456,7 @@ class GraphAgent:
         pprint(state["messages"], indent=2, width=80)
 
         # Create a preview for the data in the prompt
-        data_preview = [self.create_data_preview(item) for item in state.get("data", [])]
+        data_preview = self.create_data_preview(state.get("data", {}))
         
         plan_prompt = """SYSTEM: You are a Graph Analysis Planner. Follow these steps:
                 1. Analyze the user's query for batch processing opportunities
@@ -547,7 +545,7 @@ class GraphAgent:
         pprint(state["messages"], indent=2, width=80)
         
         # Create a preview for the data in the prompt
-        data_preview = [self.create_data_preview(item) for item in state.get("data", [])]
+        data_preview = self.create_data_preview(state.get("data", {}))
         data_preview_json = json.dumps(data_preview, indent=2)
         
         system_prompt = """You are a visualization expert. Create visual representations of the data. 
@@ -602,7 +600,7 @@ class GraphAgent:
             json_data = json.dumps(safe_data)
         
         # Create a preview of the data for the prompt using the class method
-        data_preview = [self.create_data_preview(item) for item in state["data"]]
+        data_preview = self.create_data_preview(state["data"])
         
         # HTML header template with D3.js import, minimal styling, and embedded data
         html_header = f"""<!DOCTYPE html>
@@ -867,7 +865,7 @@ class GraphAgent:
             "messages": [HumanMessage(content=query)],
             "RAG_reply": "",
             "user_query": query,
-            "data": [],  # Initialize empty data list
+            "data": {},  # Initialize empty data dictionary
             "iframe_html": "",  # Initialize empty iframe
         }
         
