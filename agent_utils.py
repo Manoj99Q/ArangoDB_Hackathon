@@ -22,6 +22,7 @@ from pprint import pprint
 import gradio as gr
 import json
 from ArangoGraphDirectChain import ArangoGraphDirectChain
+from utils import create_data_preview
 # Load environment variables
 load_dotenv()
 
@@ -82,13 +83,14 @@ class GraphAgent:
         """
         
         chain = ArangoGraphDirectChain.from_llm(
-            llm=self.llm,
+            llm=self.claude_llm,
             graph=self.arango_graph,
             verbose=True,
             allow_dangerous_requests=True,
             return_aql_query=True,
             return_aql_result=True,
             return_direct = True,
+            data_state = state["data"],
             aql_examples = """
             #Find the game that has been played by the most players
             WITH Games, plays
@@ -102,7 +104,95 @@ class GraphAgent:
             SORT playerCount DESC 
             LIMIT 1 
             RETURN {game, playerCount: playerCount}
-            """
+
+            # Analyze a user's gaming patterns
+            WITH Users, Games, plays
+
+            // Get user's plays
+            LET user_plays = (
+                FOR play IN plays
+                FILTER play._from == @target_user_id
+                RETURN play
+            )
+
+            // Calculate total gaming stats
+            LET total_games = LENGTH(user_plays)
+            LET total_hours = SUM(user_plays[*].weight)
+
+            // Categorize games by playtime without COLLECT
+            LET short_games = (
+                FOR play IN user_plays
+                FILTER play.weight <= @categories.short
+                RETURN play
+            )
+
+            LET medium_games = (
+                FOR play IN user_plays
+                FILTER play.weight > @categories.short AND play.weight <= @categories.medium
+                RETURN play
+            )
+
+            LET long_games = (
+                FOR play IN user_plays
+                FILTER play.weight > @categories.medium AND play.weight <= @categories.long
+                RETURN play
+            )
+
+            LET hardcore_games = (
+                FOR play IN user_plays
+                FILTER play.weight > @categories.long
+                RETURN play
+            )
+
+            // Get top games
+            LET top_games = (
+                FOR play IN user_plays
+                LET game = DOCUMENT(play._to)
+                SORT play.weight DESC
+                LIMIT @top_games_limit
+                RETURN {
+                    name: game.GameName,
+                    hours: play.weight
+                }
+            )
+
+            RETURN {
+                user_id: @target_user_id,
+                total_stats: {
+                    games_played: total_games,
+                    total_hours: total_hours,
+                    avg_hours_per_game: total_hours / total_games
+                },
+                categories: [
+                    {
+                        category: "short",
+                        game_count: LENGTH(short_games),
+                        total_hours: SUM(short_games[*].weight),
+                        percentage: (LENGTH(short_games) / total_games) * 100
+                    },
+                    {
+                        category: "medium",
+                        game_count: LENGTH(medium_games),
+                        total_hours: SUM(medium_games[*].weight),
+                        percentage: (LENGTH(medium_games) / total_games) * 100
+                    },
+                    {
+                        category: "long",
+                        game_count: LENGTH(long_games),
+                        total_hours: SUM(long_games[*].weight),
+                        percentage: (LENGTH(long_games) / total_games) * 100
+                    },
+                    {
+                        category: "hardcore",
+                        game_count: LENGTH(hardcore_games),
+                        total_hours: SUM(hardcore_games[*].weight),
+                        percentage: (LENGTH(hardcore_games) / total_games) * 100
+                    }
+                ],
+                top_games: top_games
+            }
+    """
+
         )
         print("AQL tool query")
         print(query)
@@ -140,7 +230,7 @@ class GraphAgent:
         # Create data preview from state if available
         data_preview = {}
         if state and "data" in state:
-            data_preview = self.create_data_preview(state["data"])
+            data_preview = create_data_preview(state["data"])
             print("State data available:")
             print(json.dumps(data_preview, indent=2))
         
@@ -312,6 +402,10 @@ class GraphAgent:
             
             exec(text_to_nx_cleaned, context)
             FINAL_RESULT = context["FINAL_RESULT"]
+            
+            # Make sure the result is JSON serializable using the specialized NetworkX serializer
+            FINAL_RESULT = self.create_networkx_serializable_data(FINAL_RESULT)
+            print("Converted FINAL_RESULT to serializable format")
 
         except Exception as e:
             print(f"EXEC ERROR: {e}")
@@ -388,10 +482,10 @@ class GraphAgent:
                             state: Annotated[dict, InjectedState] = None):
             """This tool is available to invoke the
             ArangoGraphQAChain object, which enables you to
-            translate a Natural Language Query into AQL, execute
+            translate a Natural Language question into AQL, execute
             the query and get the result.
-            
-            Only pass natural language detailed instructions on what to do.
+            This tool has access to the data at hand. So no need to pass it again.
+            Only pass natural language detailed instructions on what to do. Do not pass the query directly.
             """
             try:
                 return self.text_to_aql_to_text(query, tool_call_id=tool_call_id, var_name=name, state=state)
@@ -502,44 +596,6 @@ class GraphAgent:
         last_msg = state["messages"][-1]
         return hasattr(last_msg, 'tool_calls') and bool(last_msg.tool_calls)
 
-    def create_data_preview(self, data, max_items=2, current_depth=0, max_depth=7):
-        """Create a compact preview of data structures for prompts"""
-        if current_depth > max_depth:
-            return "..."
-        
-        # Handle NetworkX node data (tuple format)
-        if isinstance(data, tuple) and len(data) == 2:
-            node_id, attributes = data
-            return {
-                "node_id": node_id,
-                "attributes": self.create_data_preview(attributes, max_items, current_depth+1, max_depth)
-            }
-            
-        # Handle NetworkX NodeAttrDict
-        if hasattr(data, 'items'):
-            return {str(k): self.create_data_preview(v, max_items, current_depth+1, max_depth) 
-                    for k, v in data.items()}
-
-        if isinstance(data, list):
-            if not data:
-                return []
-            sample = data[:min(max_items, len(data))]
-            preview = [self.create_data_preview(item, max_items, current_depth+1, max_depth) for item in sample]
-            if len(data) > max_items:
-                preview.append(f"... ({len(data) - max_items} more items)")
-            return preview
-            
-        elif isinstance(data, dict):
-            return {str(k): self.create_data_preview(v, max_items, current_depth+1, max_depth) 
-                    for k, v in data.items()}
-                    
-        # Handle other non-serializable types
-        try:
-            json.dumps(data)
-            return data
-        except TypeError:
-            return str(data)
-
     def RAG(self, state: GraphState):
         """RAG Step to generate a plan for the query and execute it to get the results"""
 
@@ -547,16 +603,19 @@ class GraphAgent:
         pprint(state["messages"], indent=2, width=80)
 
         # Create a preview for the data in the prompt
-        data_preview = self.create_data_preview(state.get("data", {}))
+        data_preview = create_data_preview(state.get("data", {}))
         
         plan_prompt = """SYSTEM: You are a Graph Analysis Planner. Follow these steps:
                 1. Analyze the user's query for batch processing opportunities
-                2. Create optimized steps using available tools
-                3. Prefer single comprehensive queries over multiple small ones
-                4. Use aggregation and grouping where possible
-                5. Combine results for final answer
+                2. ALWAYS examine existing data in the state BEFORE making new tool calls  
+                3. Create optimized steps using available tools
+                4. Prefer single comprehensive queries over multiple small ones
+                5. Use aggregation and grouping where possible
+                6. Combine results for final answer
 
                 Rules:
+                → FIRST check if needed data already exists in Current Data at hand
+                → ALL tools have access to the Current Data at hand - no need to re-fetch existing data
                 → Look for ways to handle multiple items in one tool call
                 → Use summary statistics (sums, counts) in queries
                 → Retrieve related data in single queries when possible
@@ -636,7 +695,7 @@ class GraphAgent:
         pprint(state["messages"], indent=2, width=80)
         
         # Create a preview for the data in the prompt
-        data_preview = self.create_data_preview(state.get("data", {}))
+        data_preview = create_data_preview(state.get("data", {}))
         data_preview_json = json.dumps(data_preview, indent=2)
         
         system_prompt = """You are a visualization expert. Create visual representations of the data. 
@@ -683,6 +742,7 @@ class GraphAgent:
         import json
         try:
             json_data = json.dumps(state["data"])
+            print("Successfully serialized the data")
         except TypeError as e:
             print(f"Warning: JSON serialization issue: {e}")
             print("Attempting to create serializable version of the data...")
@@ -690,8 +750,8 @@ class GraphAgent:
             safe_data = self.create_serializable_data(state["data"])
             json_data = json.dumps(safe_data)
         
-        # Create a preview of the data for the prompt using the class method
-        data_preview = self.create_data_preview(state["data"])
+        # Create a preview of the data for the prompt using the imported function
+        data_preview = create_data_preview(state["data"])
         
         # HTML header template with D3.js import, minimal styling, and embedded data
         html_header = f"""<!DOCTYPE html>
@@ -940,6 +1000,9 @@ class GraphAgent:
             return [self.create_serializable_data(item) for item in data]
         elif isinstance(data, dict):
             return {str(k): self.create_serializable_data(v) for k, v in data.items()}
+        elif hasattr(data, '__dict__'):  # Handle custom objects
+            # Convert custom objects to dictionaries
+            return self.create_serializable_data(data.__dict__)
         else:
             # Handle non-serializable data
             try:
@@ -947,7 +1010,52 @@ class GraphAgent:
                 json.dumps(data)
                 return data
             except (TypeError, OverflowError):
-                # Convert to string if not serializable
+                # For dictionaries, recursively process them
+                if str(data).startswith('{') and str(data).endswith('}'):
+                    # This might be a string representation of a dict
+                    try:
+                        # Use ast.literal_eval for safely evaluating string representations of Python literals
+                        import ast
+                        dict_data = ast.literal_eval(str(data))
+                        if isinstance(dict_data, dict):
+                            return self.create_serializable_data(dict_data)
+                    except (SyntaxError, ValueError):
+                        pass
+                # Convert to string if nothing else works
+                return str(data)
+                
+    def create_networkx_serializable_data(self, data):
+        """Create a JSON-serializable version of NetworkX data, extracting only essential node properties.
+        This function is optimized for NetworkX node objects and avoids serializing internal metadata."""
+        if isinstance(data, list):
+            return [self.create_networkx_serializable_data(item) for item in data]
+        elif isinstance(data, dict):
+            # Explicitly exclude problematic keys that contain connection objects or internal metadata
+            excluded_keys = ['db', 'graph', 'node_id', 'parent_keys', 'node_attr_dict_factory', '_conn', '_executor', '_sessions', '_http', '_auth', '_host_resolver']
+            
+            # Return a new dict with only the keys we want to keep
+            return {str(k): self.create_networkx_serializable_data(v) 
+                   for k, v in data.items() 
+                   if k not in excluded_keys}
+        elif hasattr(data, '__dict__'):
+            # For objects with __dict__, convert to dict and process
+            obj_dict = vars(data)  # This gets the __dict__ attribute
+            
+            # Exclude the same problematic keys
+            excluded_keys = ['db', 'graph', 'node_id', 'parent_keys', 'node_attr_dict_factory', '_conn', '_executor', '_sessions', '_http', '_auth', '_host_resolver']
+            
+            # Remove excluded keys and process the rest
+            return {str(k): self.create_networkx_serializable_data(v) 
+                   for k, v in obj_dict.items() 
+                   if k not in excluded_keys}
+        else:
+            # Handle non-serializable data
+            try:
+                # Test if it's directly serializable
+                json.dumps(data)
+                return data
+            except (TypeError, OverflowError):
+                # Convert to string for non-serializable data
                 return str(data)
 
     def query_graph(self, query: str):

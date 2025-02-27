@@ -8,7 +8,8 @@ Find 2nd and 4th Most influential game in the graph and its number of users who 
 the  top 3 user who played the most number of games and the games they played
 distribution of top 10 users by their playtime and also by their number of games
 Which users have the most similar gaming preferences
-
+Which users have the most diverse gaming libraries?
+Identifies users who bridge different gaming communities
 
 Here are some examples of users with the most similar gaming preferences:
 - User "Users/103559489" and User "Users/103373255" have a similarity score of 1.0.
@@ -21,13 +22,13 @@ do both data const and also individual key constas - NOT NEEDED
 or multiple plots and toolcalls
 new claude model
 Make aql be aware of the data at hand and give it access to the state variables to use it in the code
-
+Instead of iframe; why not genrate a html file and open it in a new tab for visualization
 
 Basic Structure Analysis
 Is the relationship between users and games truly bipartite?
 Algorithm: Bipartite checking
 Analysis: Verifies that users only connect to games and vice versa, with no user-user or game-game direct connections
-Which users have the most diverse gaming libraries?
+
 Algorithm: Degree centrality
 Analysis: Identifies users with connections to the most distinct games
 Which games are the most popular among the community?
