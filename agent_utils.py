@@ -180,11 +180,12 @@ class GraphAgent:
         Be very precise on the NetworkX algorithm you select to answer this query.
         Think step by step about both correctness AND performance.
 
-        Only assume that networkx is installed, and other base python dependencies.
+        Only assume that networkx is installed, and other base python dependencies. Do not assume anything else or import anything else.
         Always set the last variable as `FINAL_RESULT`, which represents the answer to the original query.
         Only provide python code that I can directly execute via `exec()`. Do not provide any instructions.
         Make sure that `FINAL_RESULT` stores all the information for example a list of nodes, edges, etc.
         Make sure that `FINAL_RESULT` contains not just the ID but the actual node/edge object with all the properties.
+        Always try to return relevant data to the query that can help in generating a good visualization.
 
         Example of GOOD code for community detection:
         ```python
@@ -224,24 +225,24 @@ class GraphAgent:
         print(f"FINAL_RESULT: {FINAL_RESULT}")
         print('-'*10)
 
-        print("3) Formulating final answer")
-        response = self.llm.invoke(f"""
-        I have a NetworkX Graph called `G_adb`. It has the following schema: {self.arango_graph.schema}
-        I have the following graph analysis query: {query}.
-        I have executed the following python code to help me answer my query:
-        ---
-        {text_to_nx_cleaned}
-        ---
-        The `FINAL_RESULT` variable is set to: {FINAL_RESULT}.
-        Based on my original Query and FINAL_RESULT, generate a short and concise response.
-        """).content
+        # print("3) Formulating final answer")
+        # response = self.llm.invoke(f"""
+        # I have a NetworkX Graph called `G_adb`. It has the following schema: {self.arango_graph.schema}
+        # I have the following graph analysis query: {query}.
+        # I have executed the following python code to help me answer my query:
+        # ---
+        # {text_to_nx_cleaned}
+        # ---
+        # The `FINAL_RESULT` variable is set to: {FINAL_RESULT}.
+        # Based on my original Query and FINAL_RESULT, generate a short and concise response.
+        # """).content
 
         # return response
     
         return Command(
             update={
                 "data": {name: FINAL_RESULT},
-                "messages": [ToolMessage(response,tool_call_id=tool_call_id)]
+                "messages": [ToolMessage("NetworkX query executed successfully and updated the state with the result",tool_call_id=tool_call_id)]
             }
         )
 
@@ -523,7 +524,7 @@ class GraphAgent:
         """Intermediate node that extracts the last message from RAG and updates the RAG_reply state variable."""
         
         print("\nRAG_Summarizer State:")
-        pprint(state, indent=2, width=80)
+        pprint(state["messages"], indent=2, width=80)
         
         # Extract the last message from the RAG node
         messages = state["messages"]
@@ -543,7 +544,7 @@ class GraphAgent:
     def Visualizer(self, state: GraphState):
         """Agent for visualization phase"""
         print("Visualizer State:")
-        pprint(state, indent=2, width=80)
+        pprint(state["messages"], indent=2, width=80)
         
         # Create a preview for the data in the prompt
         data_preview = [self.create_data_preview(item) for item in state.get("data", [])]
@@ -551,10 +552,11 @@ class GraphAgent:
         
         system_prompt = """You are a visualization expert. Create visual representations of the data. 
                          RULES:
-                        - Generate Only One graph for the whole
+                        - You can make only one tool call for visualization
                         - Come up with different visualizations based on the data and the query
+                        - Provide clear instructions to the tool on what to generate by considering the data at hand and the query
                         - Example: a bar chart for number of hours played by each user or number users a game has been played by 
-                         -Example: Use graph type charts whenever you can based on the data at hand like a games and its users and the node size should be based on some metric"""
+                        - Example: Use graph type charts whenever you can based on the data at hand like a games and its users and the node size should be based on some metric"""
         
         # Don't embed JSON directly in the prompt to avoid template variable confusion
         user_prompt = f"Visualize for: {state['user_query']}"
@@ -681,11 +683,13 @@ class GraphAgent:
       {source: "D", target: "E"}
     ];
 
-    // Create a simulation with forces
+    // Create a simulation with forces - adjusted for better handling of many nodes
+    // Using more balanced forces similar to the reference code
     const simulation = d3.forceSimulation(nodes)
-                       .force("link", d3.forceLink(links).id(d => d.id).distance(100))
-                       .force("charge", d3.forceManyBody().strength(-300))
-                       .force("center", d3.forceCenter(width / 2, height / 2));
+                       .force("link", d3.forceLink(links).id(d => d.id).distance(30)) // Reduced distance
+                       .force("charge", d3.forceManyBody().strength(-30)) // Much weaker repulsion
+                       .force("x", d3.forceX(width / 2).strength(0.05)) // Gentle force toward center x
+                       .force("y", d3.forceY(height / 2).strength(0.05)); // Gentle force toward center y
 
     // Create and style the links
     const link = svg.append("g")
@@ -777,7 +781,6 @@ class GraphAgent:
             json.dumps(data_preview, indent=2) + "\n\n"
             "The HTML structure is already set up with:\n"
             "- D3.js v6 imported\n"
-            "- Basic body styling and an SVG element with width 600px and height 400px\n"
             "- The data already loaded and available as a global 'data' variable\n"
             "- NO visualization-specific CSS - YOU MUST include any necessary CSS for your visualization\n\n"
             "IMPORTANT: You must include any visualization-specific CSS within your script by either:\n"
@@ -872,7 +875,7 @@ class GraphAgent:
         final_state = self.agent.invoke(initial_state)
         
         print("Final Answer:")
-        pprint(final_state, indent=2, width=80)
+        pprint(final_state["messages"], indent=2, width=80)
         
         # Return structured response
         return {

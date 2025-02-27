@@ -7,8 +7,58 @@ Users who have played the most influential game
 Find 2nd and 4th Most influential game in the graph and its number of users who played both of them
 the  top 3 user who played the most number of games and the games they played
 distribution of top 10 users by their playtime and also by their number of games
+Which users have the most similar gaming preferences
+
 
 do both data const and also individual key constas - NOT NEEDED
 - one tool call only for visualizing the graph but can be combined graphs 
 or multiple plots and toolcalls
 new claude model
+Make the networkx tool be ware of the data at hand and give it access to the state variables to use it in the code
+
+Basic Structure Analysis
+Is the relationship between users and games truly bipartite?
+Algorithm: Bipartite checking
+Analysis: Verifies that users only connect to games and vice versa, with no user-user or game-game direct connections
+Which users have the most diverse gaming libraries?
+Algorithm: Degree centrality
+Analysis: Identifies users with connections to the most distinct games
+Which games are the most popular among the community?
+Algorithm: Degree centrality (for games nodes)
+Analysis: Finds games played by the most users
+Similarity and Community Detection
+Which users have the most similar gaming preferences?
+Algorithm: Projection to user-user graph + clustering
+Analysis: Creates connections between users based on common games, then identifies clusters
+If I enjoy these games, which other users have similar taste?
+Algorithm: User similarity via bipartite projection
+Analysis: Projects the graph to find users with overlapping game libraries
+Which games are frequently played together by the same users?
+Algorithm: Projection to game-game graph
+Analysis: Creates connections between games based on common players
+Recommendation and Pattern Analysis
+Which games should we recommend to a user based on their current library?
+Algorithm: User-game projection + link prediction
+Analysis: Identifies potential new connections in the bipartite graph
+Are there distinct communities or clusters of gamers with similar preferences?
+Algorithm: Spectral clustering on the bipartite graph
+Analysis: Groups users based on similar gaming patterns
+Which games serve as "bridges" between different gaming communities?
+Algorithm: Betweenness centrality
+Analysis: Identifies games that connect otherwise separate user communities
+Advanced Patterns
+Which small set of games represents the most diverse gaming interests?
+Algorithm: Minimum edge cover
+Analysis: Finds the minimal set of games that cover all users' interests
+Who are the users with completely unique gaming tastes compared to others?
+Algorithm: Maximum independent set
+Analysis: Identifies users with no gaming overlap
+If we wanted to pair each user with their most distinctive game, what would those pairings be?
+Algorithm: Maximum matching
+Analysis: Creates optimal one-to-one pairings between users and games
+Which users are the most central in connecting different gaming communities?
+Algorithm: Betweenness centrality for users
+Analysis: Identifies users who bridge different gaming communities
+How redundant are the connections in this gaming community?
+Algorithm: Bipartite redundancy
+Analysis: Measures how much overlap exists in gaming preferences
