@@ -10,11 +10,18 @@ distribution of top 10 users by their playtime and also by their number of games
 Which users have the most similar gaming preferences
 
 
+Here are some examples of users with the most similar gaming preferences:
+- User "Users/103559489" and User "Users/103373255" have a similarity score of 1.0.
+- User "Users/103559489" and User "Users/117036229" also have a similarity score of 1.0.
+
+
+
 do both data const and also individual key constas - NOT NEEDED
 - one tool call only for visualizing the graph but can be combined graphs 
 or multiple plots and toolcalls
 new claude model
-Make the networkx tool be ware of the data at hand and give it access to the state variables to use it in the code
+Make aql be aware of the data at hand and give it access to the state variables to use it in the code
+
 
 Basic Structure Analysis
 Is the relationship between users and games truly bipartite?

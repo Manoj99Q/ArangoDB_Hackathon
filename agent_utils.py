@@ -123,7 +123,7 @@ class GraphAgent:
             }
         )
 
-    def text_to_nx_algorithm_to_text(self, query: str, tool_call_id: str, name: str):
+    def text_to_nx_algorithm(self, query: str, tool_call_id: str, name: str, state=None):
         """This tool executes NetworkX algorithms based on natural language queries."""
         if self.networkx_graph is None:
             return "Error: NetworkX graph is not initialized"
@@ -137,33 +137,120 @@ class GraphAgent:
         print("-"*10)
         print("1) Generating NetworkX code")
         
+        # Create data preview from state if available
+        data_preview = {}
+        if state and "data" in state:
+            data_preview = self.create_data_preview(state["data"])
+            print("State data available:")
+            print(json.dumps(data_preview, indent=2))
+        
         # Create parts of the prompt separately to handle the braces properly
         example_code = '''
+            ### EXAMPLE 1: Using existing state data ###
             import networkx as nx
-
+            
+            # Example of accessing state data directly
+            # Assume user_communities variable contains community data
+            communities_data = user_communities
+            
+            # Process the communities data
+            results = []
+            for community_idx, community_data in enumerate(communities_data["community_data"]):
+                # Process each community
+                community_size = community_data["community_size"]
+                
+                # Calculate something useful about this community
+                result = {
+                    "community_id": community_idx,
+                    "community_size": community_size,
+                    "some_metric": community_size * 2  # Example calculation
+                }
+                results.append(result)
+                
+            FINAL_RESULT = {
+                'community_analysis': results,
+                'source': 'Used existing community data from state'
+            }
+            
+            ### EXAMPLE 2: Computing from scratch ###
+            import networkx as nx
+            
             # Use fast Louvain method for community detection
             communities = nx.community.louvain_communities(G_adb)
-
+            
             # Find the largest community
             largest_community = max(communities, key=len)
-
+            
             # Get relevant data
             largest_community_data = [G_adb.nodes[node] for node in largest_community]
-
+            
+            # For user similarity (using a subset of users for performance)
+            user_nodes = [node for node in G_adb.nodes() if node.startswith('Users/')]
+            sample_users = user_nodes[:100]  # Limit to 100 users for performance
+            
+            # Map users to their games
+            user_to_games = {}
+            for user in sample_users:
+                # Get neighbors (connected nodes) of this user
+                neighbors = list(G_adb.neighbors(user))
+                # Filter to only keep game nodes
+                games = [n for n in neighbors if n.startswith('Games/')]
+                user_to_games[user] = set(games)
+            
+            # Calculate Jaccard similarity between users
+            user_similarities = []
+            user_ids = list(user_to_games.keys())
+            for i in range(len(user_ids)):
+                for j in range(i+1, len(user_ids)):
+                    user1 = user_ids[i]
+                    user2 = user_ids[j]
+                    # Calculate Jaccard similarity
+                    games1 = user_to_games[user1]
+                    games2 = user_to_games[user2]
+                    intersection = len(games1.intersection(games2))
+                    union = len(games1.union(games2))
+                    similarity = intersection / union if union > 0 else 0
+                    
+                    if similarity > 0.5:  # Only keep significant similarities
+                        user_similarities.append({
+                            'user1': user1,
+                            'user2': user2,
+                            'similarity': similarity,
+                            'common_games_count': intersection
+                        })
+            
             FINAL_RESULT = {
                 'num_communities': len(communities),
                 'largest_community_size': len(largest_community),
-                'largest_community_data': largest_community_data[:10]  # Limit sample size for large communities
+                'largest_community_sample': largest_community_data[:10],
+                'similar_users': sorted(user_similarities, key=lambda x: x['similarity'], reverse=True)[:20]
             }
             '''
         
         # Build the prompt with proper escaping of schema
         schema_str = str(self.arango_graph.schema).replace("{", "{{").replace("}", "}}")
         
+        # Include data preview in the prompt
+        data_section = ""
+        if data_preview:
+            data_section = f"""
+            
+            AVAILABLE DATA VARIABLES:
+            I have the following data available in state that you can use directly:
+            {json.dumps(data_preview, indent=2)}
+            
+            IMPORTANT INSTRUCTIONS FOR USING STATE DATA:
+            1. DO NOT copy and paste the preview data into your code. The preview is truncated and contains placeholders like "... (N more items)".
+            2. Instead, use the variable names directly to access the COMPLETE data.
+            3. For example, if 'user_communities' is in the state, simply use the 'user_communities' variable in your code to access the full data.
+            4. Check if the variable exists before using it with: if 'variable_name' in locals()
+            5. When working with large data structures, use loops and direct access rather than hardcoding values.
+            """
+        
         prompt = f"""
         I have a NetworkX Graph called `G_adb`. It is an undirected weighted graph with {num_nodes} nodes and {num_edges} edges. It has the following schema: {schema_str}
 
-        I have the following graph analysis query: {query}.
+        I have the following graph analysis query: {query}.{data_section}
 
         Generate the Python Code required to answer the query using the `G_adb` object.
         
@@ -174,6 +261,8 @@ class GraphAgent:
         - For centrality, prefer approximation methods where available
         - Limit any expensive computations to relevant subgraphs when possible
         - Consider node/edge sampling for visualization or complex algorithms
+        - If there are relevant variables already in the state data, USE THEM DIRECTLY instead of recomputing
+
         
         Be very precise on the NetworkX algorithm you select to answer this query.
         Think step by step about both correctness AND performance.
@@ -185,7 +274,7 @@ class GraphAgent:
         Make sure that `FINAL_RESULT` contains not just the ID but the actual node/edge object with all the properties.
         Always try to return relevant data to the query that can help in generating a good visualization.
 
-        Example of GOOD code for community detection:
+        Example of GOOD code for using state data and community analysis:
         ```python
             {example_code}
         ```
@@ -211,32 +300,31 @@ class GraphAgent:
 
         print("\n2) Executing NetworkX code")
         try:
+            # Create execution context with both the graph and any state data variables
             context = {"G_adb": self.networkx_graph, "nx": nx}
+            
+            # Add state data variables to context if available
+            if state and "data" in state:
+                print("Adding state data variables to execution context:")
+                for var_name, var_value in state["data"].items():
+                    print(f"  - {var_name}")
+                    context[var_name] = var_value
+            
             exec(text_to_nx_cleaned, context)
             FINAL_RESULT = context["FINAL_RESULT"]
 
         except Exception as e:
             print(f"EXEC ERROR: {e}")
-            return f"EXEC ERROR: {e}"
+            return Command(
+                update={
+                    "messages": [ToolMessage(f"Error executing NetworkX code: {str(e)}", tool_call_id=tool_call_id)]
+                }
+            )
 
         print('-'*10)
         print(f"FINAL_RESULT: {FINAL_RESULT}")
         print('-'*10)
 
-        # print("3) Formulating final answer")
-        # response = self.llm.invoke(f"""
-        # I have a NetworkX Graph called `G_adb`. It has the following schema: {self.arango_graph.schema}
-        # I have the following graph analysis query: {query}.
-        # I have executed the following python code to help me answer my query:
-        # ---
-        # {text_to_nx_cleaned}
-        # ---
-        # The `FINAL_RESULT` variable is set to: {FINAL_RESULT}.
-        # Based on my original Query and FINAL_RESULT, generate a short and concise response.
-        # """).content
-
-        # return response
-    
         return Command(
             update={
                 "data": {name: FINAL_RESULT},
@@ -311,7 +399,10 @@ class GraphAgent:
                 return f"Error: {e}"
             
         @tool
-        def NX_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], query: Annotated[str, "Natural Language Query"],name: Annotated[str, "Name of the variable to store the result; dont use generic names"]):
+        def NX_QueryWrapper(tool_call_id: Annotated[str, InjectedToolCallId], 
+                           query: Annotated[str, "Natural Language Query"],
+                           name: Annotated[str, "Name of the variable to store the result; dont use generic names"],
+                           state: Annotated[dict, InjectedState] = None):
             """Analyze graph structure and patterns using NetworkX algorithms.
                 Best for:
                 - Finding shortest paths
@@ -319,7 +410,7 @@ class GraphAgent:
                 - Detecting communities
                 - Complex network analysis"""
             try:
-                return self.text_to_nx_algorithm_to_text(query,tool_call_id=tool_call_id,name=name)
+                return self.text_to_nx_algorithm(query, tool_call_id=tool_call_id, name=name, state=state)
             except Exception as e:
                 return f"Error: {e}"
 
@@ -470,7 +561,7 @@ class GraphAgent:
                 → Use summary statistics (sums, counts) in queries
                 → Retrieve related data in single queries when possible
                 → Handle top N results within the same query
-                → Also dont bother about visulization in the plan. There is another agent for that after this step.
+                → Also dont bother about visulization in the plan. There is another agent for that after this step. But always try to return the data that can help in generating a good visualization.
 
                
                 Graph Schema:
@@ -872,8 +963,8 @@ class GraphAgent:
         # Use invoke() instead of stream() to get final state directly
         final_state = self.agent.invoke(initial_state)
         
-        print("Final Answer:")
-        pprint(final_state["messages"], indent=2, width=80)
+        # Save the final state to a JSON file for logging
+        self.save_state_to_json(final_state, query)
         
         # Return structured response
         return {
@@ -881,5 +972,76 @@ class GraphAgent:
             "reply": final_state["messages"][-1].content,
             "rag_reply": final_state["RAG_reply"]  # Include the RAG_reply in the response
         }
+        
+    def save_state_to_json(self, state, query):
+        """Save the state to a JSON file for logging purposes"""
+        import os
+        import json
+        import datetime
+        import hashlib
+        
+        # Create a logs directory if it doesn't exist
+        logs_dir = "logs"
+        if not os.path.exists(logs_dir):
+            os.makedirs(logs_dir)
+            
+        # Create a timestamp for the filename
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Create a short hash of the query for the filename
+        query_hash = hashlib.md5(query.encode()).hexdigest()[:8]
+        
+        # Create the filename
+        filename = f"{logs_dir}/state_{timestamp}_{query_hash}.json"
+        
+        # Convert state to a serializable format
+        serializable_state = self.prepare_state_for_serialization(state)
+        
+        # Save the state to a JSON file
+        with open(filename, "w") as f:
+            json.dump(serializable_state, f, indent=2)
+            
+        print(f"State saved to {filename}")
+        
+    def prepare_state_for_serialization(self, state):
+        """Prepare the state for serialization by converting non-serializable objects"""
+        import copy
+        
+        # Make a deep copy to avoid modifying the original state
+        state_copy = copy.deepcopy(state)
+        
+        # Convert messages to a serializable format
+        if "messages" in state_copy:
+            state_copy["messages"] = [self.message_to_dict(msg) for msg in state_copy["messages"]]
+            
+        # Convert data to a serializable format using existing method
+        if "data" in state_copy:
+            state_copy["data"] = self.create_serializable_data(state_copy["data"])
+            
+        # Remove any potentially problematic fields
+        if "iframe_html" in state_copy and isinstance(state_copy["iframe_html"], object) and not isinstance(state_copy["iframe_html"], (str, int, float, bool, list, dict, type(None))):
+            state_copy["iframe_html"] = str(state_copy["iframe_html"])
+            
+        return state_copy
+        
+    def message_to_dict(self, message):
+        """Convert a message object to a dictionary"""
+        result = {
+            "type": message.__class__.__name__,
+            "content": message.content
+        }
+        
+        # Add additional fields if they exist
+        if hasattr(message, "name") and message.name:
+            result["name"] = message.name
+            
+        if hasattr(message, "tool_call_id") and message.tool_call_id:
+            result["tool_call_id"] = message.tool_call_id
+            
+        if hasattr(message, "additional_kwargs") and message.additional_kwargs:
+            # Make sure additional_kwargs is serializable
+            result["additional_kwargs"] = self.create_serializable_data(message.additional_kwargs)
+            
+        return result
 
  
