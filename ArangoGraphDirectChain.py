@@ -33,10 +33,10 @@ You may also be given a set of `AQL Query Examples` to help you create the `AQL 
 Things you should do:
 - Think step by step.
 - Review the `Data State` and use any relevant variables in your query with '@' prefix.
-- Rely on `ArangoDB Schema` and `AQL Query Examples` (if provided) to generate the query.
+- Rely on `ArangoDB Schema`,`Data State` and `AQL Query Examples` (if provided) to generate the query.
 - Begin the `AQL Query` by the `WITH` AQL keyword to specify all of the ArangoDB Collections required.
 - Return the `AQL Query` wrapped in 3 backticks (```).
-- Use only the provided relationship types and properties in the `ArangoDB Schema` and any `AQL Query Examples` queries.
+- Use only the provided relationship types and properties in the `ArangoDB Schema` and variables in the `Data State`.
 - Only answer to requests related to generating an AQL Query.
 - If a request is unrelated to generating AQL Query, say that you cannot help the user.
 
@@ -211,6 +211,15 @@ class ArangoGraphDirectChain(Chain):
             **kwargs,
         )
 
+    def _extract_bind_vars(self, aql_query: str) -> Dict[str, Any]:
+        """Extract only the bind variables that are used in the query."""
+        # Find all @variable_name patterns in the query
+        bind_var_pattern = r'@([a-zA-Z_][a-zA-Z0-9_]*)'
+        used_vars = set(re.findall(bind_var_pattern, aql_query))
+        
+        # Create a new dict with only the bind variables that are used in the query
+        return {k: v for k, v in self.data_state.items() if k in used_vars}
+
     def _call(
         self,
         inputs: Dict[str, Any],
@@ -288,9 +297,9 @@ class ArangoGraphDirectChain(Chain):
             from arango import AQLQueryExecuteError
 
             try:
-                # Pass full data_state as bind variables to the AQL query
-
-                aql_result = self.graph.query(aql_query, self.top_k, bind_vars=self.data_state)
+                # Filter bind_vars to only include variables referenced in the query
+                used_bind_vars = self._extract_bind_vars(aql_query)
+                aql_result = self.graph.query(aql_query, self.top_k, bind_vars=used_bind_vars)
             except AQLQueryExecuteError as e:
                 aql_error = e.error_message
 

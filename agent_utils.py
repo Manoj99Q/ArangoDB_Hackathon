@@ -262,58 +262,29 @@ class GraphAgent:
                 'source': 'Used existing community data from state'
             }
             
-            ### EXAMPLE 2: Computing from scratch ###
+           ### EXAMPLE 2: Basic Community Analysis ###
             import networkx as nx
+            from collections import Counter
             
-            # Use fast Louvain method for community detection
-            communities = nx.community.louvain_communities(G_adb)
+            # Use Label Propagation for community detection
+            communities = nx.community.label_propagation_communities(G_adb)
+            communities = list(communities)
             
-            # Find the largest community
-            largest_community = max(communities, key=len)
-            
-            # Get relevant data
-            largest_community_data = [G_adb.nodes[node] for node in largest_community]
-            
-            # For user similarity (using a subset of users for performance)
-            user_nodes = [node for node in G_adb.nodes() if node.startswith('Users/')]
-            sample_users = user_nodes[:100]  # Limit to 100 users for performance
-            
-            # Map users to their games
-            user_to_games = {}
-            for user in sample_users:
-                # Get neighbors (connected nodes) of this user
-                neighbors = list(G_adb.neighbors(user))
-                # Filter to only keep game nodes
-                games = [n for n in neighbors if n.startswith('Games/')]
-                user_to_games[user] = set(games)
-            
-            # Calculate Jaccard similarity between users
-            user_similarities = []
-            user_ids = list(user_to_games.keys())
-            for i in range(len(user_ids)):
-                for j in range(i+1, len(user_ids)):
-                    user1 = user_ids[i]
-                    user2 = user_ids[j]
-                    # Calculate Jaccard similarity
-                    games1 = user_to_games[user1]
-                    games2 = user_to_games[user2]
-                    intersection = len(games1.intersection(games2))
-                    union = len(games1.union(games2))
-                    similarity = intersection / union if union > 0 else 0
-                    
-                    if similarity > 0.5:  # Only keep significant similarities
-                        user_similarities.append({
-                            'user1': user1,
-                            'user2': user2,
-                            'similarity': similarity,
-                            'common_games_count': intersection
-                        })
+            # Analyze all communities
+            community_stats = []
+            for idx, community in enumerate(communities):
+                # Count node types (Users, Games, etc.)
+                node_types = Counter(node.split('/')[0] for node in community)
+                
+                community_stats.append({
+                    'community_id': idx,
+                    'size': len(community),
+                    'composition': dict(node_types)
+                })
             
             FINAL_RESULT = {
                 'num_communities': len(communities),
-                'largest_community_size': len(largest_community),
-                'largest_community_sample': largest_community_data[:10],
-                'similar_users': sorted(user_similarities, key=lambda x: x['similarity'], reverse=True)[:20]
+                'all_communities': sorted(community_stats, key=lambda x: x['size'], reverse=True)
             }
             '''
         
@@ -399,16 +370,24 @@ class GraphAgent:
                 for var_name, var_value in state["data"].items():
                     print(f"  - {var_name}")
                     context[var_name] = var_value
+            print("Executing NetworkX code after adding state data variables to execution context:")
             
-            exec(text_to_nx_cleaned, context)
-            FINAL_RESULT = context["FINAL_RESULT"]
+            try:
+                exec(text_to_nx_cleaned, context)
+                FINAL_RESULT = context["FINAL_RESULT"]
+            except Exception as e:
+                import traceback
+                print("Full traceback:")
+                traceback.print_exc()
+                print(f"\nError occurred in NetworkX code: {str(e)}")
+                raise  # Re-raise to be caught by outer try-except
             
             # Make sure the result is JSON serializable using the specialized NetworkX serializer
             FINAL_RESULT = self.create_networkx_serializable_data(FINAL_RESULT)
             print("Converted FINAL_RESULT to serializable format")
 
         except Exception as e:
-            print(f"EXEC ERROR: {e}")
+            print(f"EXEC ERROR: {str(e)}")
             return Command(
                 update={
                     "messages": [ToolMessage(f"Error executing NetworkX code: {str(e)}", tool_call_id=tool_call_id)]
@@ -599,9 +578,9 @@ class GraphAgent:
     def RAG(self, state: GraphState):
         """RAG Step to generate a plan for the query and execute it to get the results"""
 
-        return{
-            "messages": AIMessage(content="Done")
-        }
+        # return{
+        #     "messages": AIMessage(content="Done")
+        # }
 
         print("\nProcessing Agent State:")
         pprint(state["messages"], indent=2, width=80)
@@ -698,18 +677,18 @@ class GraphAgent:
         print("Visualizer State:")
         pprint(state["messages"], indent=2, width=80)
 
-        # test code
-        hmtlfilepath = "./vis.html"
-        with open(hmtlfilepath, 'r') as file:
-            file_content = file.read()
-        encoded_html = base64.b64encode(file_content.encode('utf-8')).decode('utf-8')
-        data_url = f"data:text/html;base64,{encoded_html}"
-        iframe_html = f'<iframe src="{data_url}" width="620" height="420" frameborder="0"></iframe>'
+        # # test code
+        # hmtlfilepath = "./vis.html"
+        # with open(hmtlfilepath, 'r') as file:
+        #     file_content = file.read()
+        # encoded_html = base64.b64encode(file_content.encode('utf-8')).decode('utf-8')
+        # data_url = f"data:text/html;base64,{encoded_html}"
+        # iframe_html = f'<iframe src="{data_url}" width="620" height="420" frameborder="0"></iframe>'
 
-        return{
-            "messages": AIMessage(content="Done"),
-            "iframe_html": gr.HTML(value=iframe_html)
-        }
+        # return{
+        #     "messages": AIMessage(content="Done"),
+        #     "iframe_html": gr.HTML(value=iframe_html)
+        # }
         
         # Create a preview for the data in the prompt
         data_preview = create_data_preview(state.get("data", {}))
@@ -755,10 +734,6 @@ class GraphAgent:
         """Dynamically generates code for an interactive D3.js visualization.
         Needs clear instruction on what type of plot to generate"""
         
-
-
-        
-
         # Serialize the data to JSON for embedding in the HTML
         import json
         try:
@@ -774,64 +749,92 @@ class GraphAgent:
         # Create a preview of the data for the prompt using the imported function
         data_preview = create_data_preview(state["data"])
         
-        # HTML header template with D3.js import, minimal styling, and embedded data
-        html_header = f"""<!DOCTYPE html>
+        # Part 1: HTML head and body opening
+        html_head = """
                     <html lang="en">
                     <head>
                     <meta charset="UTF-8">
-                    <title>D3.js Visualization</title>
                     <script src="https://d3js.org/d3.v6.min.js"></script>
                     <style>
-                        body {{ 
+                        body { 
                             font: 14px sans-serif; 
                             margin: 0; 
                             padding: 0;
-                            width: 100%;
+                            width: 100vw;
                             height: 100vh;
-                        }}
-                        h2 {{
-                            margin: 10px;
-                        }}
-                        #visualization-container {{
-                            width: 100%;
-                            height: calc(100vh - 50px); /* Subtract the approximate header height */
+                            background-color: white;
+                            overflow: hidden;
+                        }
+                        
+                        #visualization-container {
+                            width: 100vw;
+                            height: 100vh;
                             position: relative;
-                        }}
-                        svg {{ 
+                            overflow: hidden;
+                        }  
+                        
+                        svg {
+                            position: absolute;
+                            top: 0;
+                            left: 0;
                             width: 100%;
                             height: 100%;
                             display: block;
-                            border: 1px solid #ccc; 
-                        }}
-                        /* The visualization-specific CSS will be provided by the model */
+                        }
                     </style>
-                    <script>
-                        // Data from the application state
-                        const data = {json_data};
-                        
-                        // Function to get dimensions with margins
-                        function getDimensions() {{
-                            const svg = d3.select("svg");
-                            const fullWidth = svg.node().clientWidth || svg.node().parentNode.clientWidth;
-                            const fullHeight = svg.node().clientHeight || svg.node().parentNode.clientHeight;
-                            
-                            // Define margins for the visualization
-                            const margin = {{top: 20, right: 20, bottom: 20, left: 20}};
-                            
-                            // Calculate the available width and height for the visualization
-                            const width = fullWidth - margin.left - margin.right;
-                            const height = fullHeight - margin.top - margin.bottom;
-                            
-                            return {{ width, height, margin, fullWidth, fullHeight }};
-                        }}
-                    </script>
                     </head>
                     <body>
-                    <h2 id="visualization-title">Data Visualization</h2>
                     <div id="visualization-container">
                         <svg></svg>
                     </div>
-            """
+        """
+
+        # Part 2: Data injection with f-string
+        data_script = f"""
+                    <script>
+                        // Data from the application state
+                        const data = {json_data};
+        """
+
+        # Part 3: Main JavaScript code
+        visualization_script = """
+                        // Function to get dimensions with margins
+                         function getDimensions() {
+                            const container = document.getElementById('visualization-container');
+                            const fullWidth = container.clientWidth;
+                            const fullHeight = container.clientHeight;
+                            
+                            const margin = {top: 20, right: 20, bottom: 20, left: 20};
+                            const width = fullWidth - margin.left - margin.right;
+                            const height = fullHeight - margin.top - margin.bottom;
+                            
+                            return { width, height, margin, fullWidth, fullHeight };
+                        }
+                        // Get SVG dimensions
+                        const svg = d3.select("svg")
+                            .attr("preserveAspectRatio", "xMidYMid meet")
+                            .attr("viewBox", function() {
+                                const dims = getDimensions();
+                                return `0 0 ${dims.fullWidth} ${dims.fullHeight}`;
+                            });
+                        let { width:aa, height:bb, margin:cc, fullWidth:dd, fullHeight:ee } = getDimensions();
+                        // Create main group
+                        const g = svg.append("g")
+                            .attr("transform", `translate(${cc.left},${cc.top})`);
+
+                        // Update zoom behavior to use dynamic dimensions
+                        const zoom = d3.zoom()
+                            .scaleExtent([0.1, 4])
+                            .on("zoom", (event) => {
+                                g.attr("transform", event.transform);
+                            });
+
+                        svg.call(zoom);
+                    </script>
+        """
+
+        # Combine all parts
+        html_header = html_head + data_script + visualization_script
 
         # HTML footer template
         html_footer = """
@@ -840,125 +843,244 @@ class GraphAgent:
 
         # Example D3.js code to show the model what we expect
         example_d3_code = """
-  <script>
-    // The data is already available as a global 'data' variable
-    console.log("Data available:", data);
-    
-    // Select the SVG element and get dimensions with margins
-    const svg = d3.select("svg");
-    const { width, height, margin, fullWidth, fullHeight } = getDimensions();
-    
-    // Create a group element that translates the content to respect margins
-    const g = svg.append("g")
-        .attr("transform", `translate(${margin.left},${margin.top})`);
-        
-    // Add zoom functionality
-    const zoom = d3.zoom()
-        .scaleExtent([0.1, 10])
-        .on("zoom", (event) => {
-            g.attr("transform", event.transform);
-        });
-        
-    svg.call(zoom);
-    
-    // Create a force simulation
-    const simulation = d3.forceSimulation(data.nodes)
-        .force("link", d3.forceLink(data.links).id(d => d.id).distance(100))
-        .force("charge", d3.forceManyBody().strength(-300))
-        .force("center", d3.forceCenter(width / 2, height / 2))
-        .force("x", d3.forceX(width / 2))
-        .force("y", d3.forceY(height / 2));
-        
-    // Create the links
-    const link = g.selectAll(".link")
-        .data(data.links)
-        .enter()
-        .append("line")
-        .attr("class", "link")
-        .attr("stroke", "#999")
-        .attr("stroke-width", 1.5);
-        
-    // Create the nodes
-    const node = g.selectAll(".node")
-        .data(data.nodes)
-        .enter()
-        .append("circle")
-        .attr("class", "node")
-        .attr("r", 8)
-        .attr("fill", "#1f77b4")
-        .call(d3.drag()
-            .on("start", dragstarted)
-            .on("drag", dragged)
-            .on("end", dragended));
+                <script>
+                // The data is already available as a global 'data' variable
+                console.log("Data available:", data);
+                
+                // Add necessary styles
+            const styleSheet = document.createElement("style");
+            styleSheet.textContent = `
+                .node { cursor: pointer; }
+                .link { stroke: #999; stroke-opacity: 0.6; }
+                .node-label { font-size: 12px; font-family: sans-serif; pointer-events: none; }
+            `;
+            document.head.appendChild(styleSheet);
+
+            // Process data into nodes and links
+            const nodes = [];
+            const links = [];
+
+            data.top_users_and_games[0].forEach(userObj => {
+            // Add user node
+            nodes.push({
+                id: userObj.user._key,
+                type: "user",
+                size: userObj.total_games,
+                name: `User ${userObj.user._key}`
+            });
             
-    // Add labels to nodes
-    const labels = g.selectAll(".label")
-        .data(data.nodes)
-        .enter()
-        .append("text")
-        .attr("class", "label")
-        .attr("text-anchor", "middle")
-        .attr("dy", -12)
-        .text(d => d.name || d.id)
-        .attr("font-size", "10px");
-    
-    // Define tick behavior
-    simulation.on("tick", () => {
-        link
-            .attr("x1", d => d.source.x)
-            .attr("y1", d => d.source.y)
-            .attr("x2", d => d.target.x)
-            .attr("y2", d => d.target.y);
-            
-        node
-            .attr("cx", d => d.x)
-            .attr("cy", d => d.y);
-            
-        labels
-            .attr("x", d => d.x)
-            .attr("y", d => d.y);
-    });
-    
-    // Drag functions
-    function dragstarted(event, d) {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
-        d.fx = d.x;
-        d.fy = d.y;
-    }
-    
-    function dragged(event, d) {
-        d.fx = event.x;
-        d.fy = event.y;
-    }
-    
-    function dragended(event, d) {
-        if (!event.active) simulation.alphaTarget(0);
-        d.fx = null;
-        d.fy = null;
-    }
+            // Add game nodes and links
+            userObj.games.forEach(game => {
+                // Check if game node already exists
+                let gameNode = nodes.find(n => n.id === game._key);
+                if (!gameNode) {
+                nodes.push({
+                    id: game._key,
+                    type: "game",
+                    name: game.GameName,
+                    size: 20
+                });
+                }
+                
+                links.push({
+                source: userObj.user._key,
+                target: game._key
+                });
+            });
+            });
+
+            // Update force simulation to use dynamic dimensions
+            const simulation = d3.forceSimulation(nodes)
+                .force("link", d3.forceLink(links).id(d => d.id).distance(width * 0.1)) // Make distance relative to width
+                .force("charge", d3.forceManyBody().strength(-width * 0.3)) // Make strength relative to width
+                .force("center", d3.forceCenter(width / 2, height / 2));
+
+            // Draw links
+            const link = g.selectAll(".link")
+                .data(links)
+                .join("line")
+                .attr("class", "link");
+
+            // Draw nodes
+            const node = g.selectAll(".node")
+                .data(nodes)
+                .join("circle")
+                .attr("class", "node")
+                .attr("r", d => Math.sqrt(d.size) * 2)
+                .attr("fill", d => d.type === "user" ? "#ff7f0e" : "#1f77b4")
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+
+            // Add labels
+            const label = g.selectAll(".node-label")
+                .data(nodes)
+                .join("text")
+                .attr("class", "node-label")
+                .text(d => d.name)
+                .attr("dy", d => d.type === "user" ? -15 : 25);
+
+
+
+
+            // Update positions on tick
+            simulation.on("tick", () => {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+
+                node
+                    .attr("cx", d => d.x)
+                    .attr("cy", d => d.y);
+
+                label
+                    .attr("x", d => d.x)
+                    .attr("y", d => d.y);
+            });
+
+            // Drag functions
+            function dragstarted(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            }
+
+            function dragged(event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            }
+
+            function dragended(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }
+
+            </script>
 """
 
         # Create a more focused prompt that asks only for the D3.js code
         visualization_prompt = (
-            "You are an expert D3.js developer specializing in interactive visualizations. "
-            "I already have the HTML boilerplate code with D3.js imported and an SVG element set up. "
-            "Generate ONLY the JavaScript code within <script> tags to create an interactive visualization based on the following specification: "
-            f"{query}\n\n"
-            "IMPORTANT: The data is already available as a global JavaScript variable named 'data'. "
-            "Here's a preview of the structure (actual data may contain more elements): \n" + 
+            "You are an expert D3.js developer specializing in creating all types of data visualizations. "
+            "I have already set up a complete D3.js visualization environment with the following components:\n\n"
+            
+            "1. Pre-configured SVG and Container:\n"
+            "- A responsive SVG element within #visualization-container\n"
+            "- Margins and dimensions handled via getDimensions() function\n"
+            "- Zoom behavior already implemented and bound to the SVG\n"
+            "- A main group 'g' created and transformed with margins\n\n"
+            
+            "2. Core D3.js Setup:\n"
+            "- D3.js v6 imported and ready to use\n"
+            "- Base SVG structure with proper viewBox and preserveAspectRatio\n"
+            "- Responsive container with automatic resizing\n\n"
+            
+            "3. Available Variables and Functions:\n"
+            "- data: Global variable containing the dataset\n"
+            "- getDimensions(): Returns {width, height, margin, fullWidth, fullHeight}\n"
+            "- g: Main SVG group for adding visualization elements\n"
+            "- svg: Main SVG selection with zoom behavior\n\n"
+            
+            f"Create an interactive visualization based on this specification: {query}\n\n"
+            
+            "VISUALIZATION TYPES AND CONSIDERATIONS:\n"
+            "1. For Bar Charts:\n"
+            "   - Use d3.scaleBand() for x-axis with categorical data\n"
+            "   - Implement proper scales and axes\n"
+            "   - Consider orientation (vertical/horizontal)\n"
+            "   - Add value labels and tooltips\n\n"
+            
+            "2. For Pie/Donut Charts:\n"
+            "   - Use d3.pie() and d3.arc() generators\n"
+            "   - Center in the SVG using width/height\n"
+            "   - Add labels and percentage calculations\n"
+            "   - Consider interactive legends\n\n"
+            
+            "3. For Line/Area Charts:\n"
+            "   - Use d3.line() or d3.area() generators\n"
+            "   - Implement proper scales for both axes\n"
+            "   - Add gridlines and axes\n"
+            "   - Consider data point markers\n\n"
+            
+            "4. For Network/Force Graphs:\n"
+            "   - Use d3.forceSimulation() for layout\n"
+            "   - Implement node/link structures\n"
+            "   - Add drag behavior and collision detection\n"
+            "   - Consider force parameters based on data size\n\n"
+            
+            "5. For Scatter Plots:\n"
+            "   - Use appropriate scales for both axes\n"
+            "   - Add axis labels and gridlines\n"
+            "   - Consider adding trend lines\n"
+            "   - Implement point sizing and coloring\n\n"
+            
+            "FOCUS ON:\n"
+            "1. Visual Elements:\n"
+            "   - Create clear and intuitive visual representations\n"
+            "   - Implement proper scales and axes where needed\n"
+            "   - Add legends and labels as appropriate\n"
+            "   - Use color scales effectively\n"
+            
+            "2. Interactivity:\n"
+            "   - Add hover effects and tooltips\n"
+            "   - Implement click interactions if relevant\n"
+            "   - Add transitions and animations for updates\n"
+            "   - Consider filtering or selection mechanisms\n"
+            
+            "3. Styling and Layout:\n"
+            "   - Add chart-specific CSS via styleSheet.textContent\n"
+            "   - Implement responsive sizing\n"
+            "   - Use appropriate colors and visual hierarchy\n"
+            "   - Consider accessibility in color choices\n\n"
+            
+            "Data Structure Preview:\n" + 
             json.dumps(data_preview, indent=2) + "\n\n"
-            "The HTML structure is already set up with:\n"
-            "- D3.js v6 imported\n"
-            "- The data already loaded and available as a global 'data' variable\n"
-            "- NO visualization-specific CSS - YOU MUST include any necessary CSS for your visualization\n\n"
-            "IMPORTANT: You must include any visualization-specific CSS within your script by either:\n"
-            "1. Adding a <style> element to the document head, or\n"
-            "2. Setting inline styles on the SVG elements\n\n"
-            "For reference, here is an example of D3.js code with CSS handling for a Force-Directed Graph: "
-            f"{example_d3_code}\n\n"
-            "Use getDimensions() to get the dimensions of the SVG element as shown in the example code"
-            "Output ONLY the <script> element with your visualization code. Do not include DOCTYPE, HTML, head, or body tags."
-            "And if the task is simple you can amp it up with effects and animations only if you are confident without errors or else just keep it simple"
+            
+            "IMPORTANT GUIDELINES:\n"
+            "1. DO NOT recreate the SVG or container - use existing setup\n"
+            "2. DO NOT modify the existing container structure\n"
+            "3. ADD all visualization-specific styles via JavaScript\n"
+            "4. USE the existing 'g' group for adding visualization elements\n"
+            "5. UTILIZE getDimensions() for responsive sizing\n"
+            "6. ENSURE proper cleanup before redrawing\n"
+            "7. IMPLEMENT proper scales based on data ranges\n"
+            "8. ADD appropriate axes and legends as needed\n"
+            "9. Design the visualization based on the data available and the query\n"
+            
+            "Common D3.js Patterns:\n"
+            "1. Scales and Axes:\n"
+            "   ```javascript\n"
+            "   const xScale = d3.scaleLinear().domain([min, max]).range([0, width]);\n"
+            "   const yScale = d3.scaleLinear().domain([min, max]).range([height, 0]);\n"
+            "   const xAxis = d3.axisBottom(xScale);\n"
+            "   const yAxis = d3.axisLeft(yScale);\n"
+            "   ```\n\n"
+            
+            "2. Data Binding:\n"
+            "   ```javascript\n"
+            "   const elements = g.selectAll('.element')\n"
+            "     .data(data)\n"
+            "     .join('g')\n"
+            "     .attr('class', 'element');\n"
+            "   ```\n\n"
+            
+            "3. Transitions:\n"
+            "   ```javascript\n"
+            "   elements.transition()\n"
+            "     .duration(750)\n"
+            "     .attr('property', value);\n"
+            "   ```\n\n"
+            
+            "Output Requirements:\n"
+            "1. Provide ONLY the visualization-specific code within <script> tags\n"
+            "2. Include visualization-specific CSS via JavaScript\n"
+            "3. Implement proper scales and axes as needed\n"
+            "4. Add appropriate interactions and animations\n"
+            
+            "DO NOT include any HTML structure, just the <script> content for the visualization."
         )
         
         # Log the prompt for verification
