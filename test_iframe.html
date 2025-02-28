@@ -51,6 +51,10 @@ const svg = d3.select("svg");
 const width = +svg.attr("width");
 const height = +svg.attr("height");
 
+// Create a main container group for all elements
+const g = svg.append("g");
+
+
 // Process data into nodes and links
 const nodes = [];
 const links = [];
@@ -97,14 +101,14 @@ const simulation = d3.forceSimulation(nodes)
   .force("collision", d3.forceCollide().radius(d => getNodeRadius(d) + 2));
 
 // Create links
-const link = svg.append("g")
+const link = g.append("g")
   .selectAll("line")
   .data(links)
   .join("line")
   .attr("class", "link");
 
 // Create nodes
-const node = svg.append("g")
+const node = g.append("g")
   .selectAll("circle")
   .data(nodes)
   .join("circle")
@@ -120,7 +124,7 @@ const node = svg.append("g")
   .call(drag(simulation));
 
 // Add labels
-const label = svg.append("g")
+const label = g.append("g")
   .selectAll("text")
   .data(nodes)
   .join("text")
@@ -152,6 +156,16 @@ function getNodeRadius(d) {
   }
   return d.communities.length * 3 + 5; // Larger radius for users in more communities
 }
+
+// Add zoom behavior
+const zoom = d3.zoom()
+    .scaleExtent([0.1, 4])
+    .on("zoom", (event) => {
+        g.attr("transform", event.transform);
+    });
+
+svg.call(zoom);
+
 
 // Drag functions
 function drag(simulation) {

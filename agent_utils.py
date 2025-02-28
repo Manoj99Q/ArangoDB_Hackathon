@@ -599,6 +599,10 @@ class GraphAgent:
     def RAG(self, state: GraphState):
         """RAG Step to generate a plan for the query and execute it to get the results"""
 
+        return{
+            "messages": AIMessage(content="Done")
+        }
+
         print("\nProcessing Agent State:")
         pprint(state["messages"], indent=2, width=80)
 
@@ -693,6 +697,19 @@ class GraphAgent:
         """Agent for visualization phase"""
         print("Visualizer State:")
         pprint(state["messages"], indent=2, width=80)
+
+        # test code
+        hmtlfilepath = "./vis.html"
+        with open(hmtlfilepath, 'r') as file:
+            file_content = file.read()
+        encoded_html = base64.b64encode(file_content.encode('utf-8')).decode('utf-8')
+        data_url = f"data:text/html;base64,{encoded_html}"
+        iframe_html = f'<iframe src="{data_url}" width="620" height="420" frameborder="0"></iframe>'
+
+        return{
+            "messages": AIMessage(content="Done"),
+            "iframe_html": gr.HTML(value=iframe_html)
+        }
         
         # Create a preview for the data in the prompt
         data_preview = create_data_preview(state.get("data", {}))
@@ -738,6 +755,10 @@ class GraphAgent:
         """Dynamically generates code for an interactive D3.js visualization.
         Needs clear instruction on what type of plot to generate"""
         
+
+
+        
+
         # Serialize the data to JSON for embedding in the HTML
         import json
         try:
@@ -755,26 +776,61 @@ class GraphAgent:
         
         # HTML header template with D3.js import, minimal styling, and embedded data
         html_header = f"""<!DOCTYPE html>
-            <html lang="en">
-            <head>
-            <meta charset="UTF-8">
-            <title>D3.js Visualization</title>
-            <script src="https://d3js.org/d3.v6.min.js"></script>
-            <style>
-                body {{ font: 14px sans-serif; margin: 20px; }}
-                svg {{ border: 1px solid #ccc; }}
-                /* The visualization-specific CSS will be provided by the model */
-            </style>
-            <script>
-                // Data from the application state
-                const data = {json_data};
-            </script>
-            </head>
-            <body>
-            <h2 id="visualization-title">Data Visualization</h2>
-            <div id="visualization-container">
-                <svg width="1200" height="800"></svg>
-            </div>
+                    <html lang="en">
+                    <head>
+                    <meta charset="UTF-8">
+                    <title>D3.js Visualization</title>
+                    <script src="https://d3js.org/d3.v6.min.js"></script>
+                    <style>
+                        body {{ 
+                            font: 14px sans-serif; 
+                            margin: 0; 
+                            padding: 0;
+                            width: 100%;
+                            height: 100vh;
+                        }}
+                        h2 {{
+                            margin: 10px;
+                        }}
+                        #visualization-container {{
+                            width: 100%;
+                            height: calc(100vh - 50px); /* Subtract the approximate header height */
+                            position: relative;
+                        }}
+                        svg {{ 
+                            width: 100%;
+                            height: 100%;
+                            display: block;
+                            border: 1px solid #ccc; 
+                        }}
+                        /* The visualization-specific CSS will be provided by the model */
+                    </style>
+                    <script>
+                        // Data from the application state
+                        const data = {json_data};
+                        
+                        // Function to get dimensions with margins
+                        function getDimensions() {{
+                            const svg = d3.select("svg");
+                            const fullWidth = svg.node().clientWidth || svg.node().parentNode.clientWidth;
+                            const fullHeight = svg.node().clientHeight || svg.node().parentNode.clientHeight;
+                            
+                            // Define margins for the visualization
+                            const margin = {{top: 20, right: 20, bottom: 20, left: 20}};
+                            
+                            // Calculate the available width and height for the visualization
+                            const width = fullWidth - margin.left - margin.right;
+                            const height = fullHeight - margin.top - margin.bottom;
+                            
+                            return {{ width, height, margin, fullWidth, fullHeight }};
+                        }}
+                    </script>
+                    </head>
+                    <body>
+                    <h2 id="visualization-title">Data Visualization</h2>
+                    <div id="visualization-container">
+                        <svg></svg>
+                    </div>
             """
 
         # HTML footer template
@@ -786,137 +842,100 @@ class GraphAgent:
         example_d3_code = """
   <script>
     // The data is already available as a global 'data' variable
-    // You can access it directly with the 'data' variable
     console.log("Data available:", data);
     
-    // Select the SVG element and set dimensions
+    // Select the SVG element and get dimensions with margins
     const svg = d3.select("svg");
-    const width = +svg.attr("width");
-    const height = +svg.attr("height");
-
-    // Add necessary CSS styles for this specific visualization
-    const style = document.createElement('style');
-    style.textContent = `
-      .link { 
-        stroke: #999; 
-        stroke-opacity: 0.6; 
-      }
-      .node { 
-        stroke: #fff; 
-        stroke-width: 1.5px;
-        transition: r 0.2s, fill 0.2s;
-      }
-      .node:hover {
-        fill: #ff7700;
-        cursor: pointer;
-      }
-      .node-label {
-        font-size: 12px;
-        font-weight: bold;
-        text-anchor: middle;
-        pointer-events: none;
-      }
-    `;
-    document.head.appendChild(style);
-
-    // Example visualization code for a force-directed graph
-    // You would adapt this to your specific data and requirements
-    const nodes = [
-      {id: "A"}, {id: "B"}, {id: "C"}, {id: "D"}, {id: "E"}
-    ];
-    const links = [
-      {source: "A", target: "B"},
-      {source: "A", target: "C"},
-      {source: "B", target: "D"},
-      {source: "C", target: "D"},
-      {source: "D", target: "E"}
-    ];
-
-    // Create a simulation with forces - adjusted for better handling of many nodes
-    // Using more balanced forces similar to the reference code
-    const simulation = d3.forceSimulation(nodes)
-                       .force("link", d3.forceLink(links).id(d => d.id).distance(30)) // Reduced distance
-                       .force("charge", d3.forceManyBody().strength(-30)) // Much weaker repulsion
-                       .force("x", d3.forceX(width / 2).strength(0.05)) // Gentle force toward center x
-                       .force("y", d3.forceY(height / 2).strength(0.05)); // Gentle force toward center y
-
-    // Create and style the links
-    const link = svg.append("g")
-                  .attr("class", "links")
-                  .selectAll("line")
-                  .data(links)
-                  .enter().append("line")
-                  .attr("class", "link")
-                  .attr("stroke-width", 2);
-
-    // Create and style the nodes
-    const node = svg.append("g")
-                  .attr("class", "nodes")
-                  .selectAll("circle")
-                  .data(nodes)
-                  .enter().append("circle")
-                  .attr("class", "node")
-                  .attr("r", 10)
-                  .attr("fill", "steelblue")
-                  .call(d3.drag()
-                      .on("start", dragstarted)
-                      .on("drag", dragged)
-                      .on("end", dragended))
-                  .on("mouseover", function(event, d) {
-                    d3.select(this)
-                      .attr("r", 15)
-                      .attr("fill", "#ff7700");
-                  })
-                  .on("mouseout", function(event, d) {
-                    d3.select(this)
-                      .attr("r", 10)
-                      .attr("fill", "steelblue");
-                  });
-
-    // Add a tooltip to each node
-    node.append("title")
-        .text(d => d.id);
+    const { width, height, margin, fullWidth, fullHeight } = getDimensions();
+    
+    // Create a group element that translates the content to respect margins
+    const g = svg.append("g")
+        .attr("transform", `translate(${margin.left},${margin.top})`);
         
-    // Add text labels for nodes
-    const labels = svg.append("g")
-                  .attr("class", "labels")
-                  .selectAll("text")
-                  .data(nodes)
-                  .enter().append("text")
-                  .attr("class", "node-label")
-                  .attr("dy", -15)  // Position above the node
-                  .text(d => d.id);
-
-    // Update positions on each tick of the simulation
+    // Add zoom functionality
+    const zoom = d3.zoom()
+        .scaleExtent([0.1, 10])
+        .on("zoom", (event) => {
+            g.attr("transform", event.transform);
+        });
+        
+    svg.call(zoom);
+    
+    // Create a force simulation
+    const simulation = d3.forceSimulation(data.nodes)
+        .force("link", d3.forceLink(data.links).id(d => d.id).distance(100))
+        .force("charge", d3.forceManyBody().strength(-300))
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("x", d3.forceX(width / 2))
+        .force("y", d3.forceY(height / 2));
+        
+    // Create the links
+    const link = g.selectAll(".link")
+        .data(data.links)
+        .enter()
+        .append("line")
+        .attr("class", "link")
+        .attr("stroke", "#999")
+        .attr("stroke-width", 1.5);
+        
+    // Create the nodes
+    const node = g.selectAll(".node")
+        .data(data.nodes)
+        .enter()
+        .append("circle")
+        .attr("class", "node")
+        .attr("r", 8)
+        .attr("fill", "#1f77b4")
+        .call(d3.drag()
+            .on("start", dragstarted)
+            .on("drag", dragged)
+            .on("end", dragended));
+            
+    // Add labels to nodes
+    const labels = g.selectAll(".label")
+        .data(data.nodes)
+        .enter()
+        .append("text")
+        .attr("class", "label")
+        .attr("text-anchor", "middle")
+        .attr("dy", -12)
+        .text(d => d.name || d.id)
+        .attr("font-size", "10px");
+    
+    // Define tick behavior
     simulation.on("tick", () => {
-      link.attr("x1", d => d.source.x)
-          .attr("y1", d => d.source.y)
-          .attr("x2", d => d.target.x)
-          .attr("y2", d => d.target.y);
-
-      node.attr("cx", d => d.x)
-          .attr("cy", d => d.y);
-          
-      labels.attr("x", d => d.x)
+        link
+            .attr("x1", d => d.source.x)
+            .attr("y1", d => d.source.y)
+            .attr("x2", d => d.target.x)
+            .attr("y2", d => d.target.y);
+            
+        node
+            .attr("cx", d => d.x)
+            .attr("cy", d => d.y);
+            
+        labels
+            .attr("x", d => d.x)
             .attr("y", d => d.y);
     });
-
-    // Define drag event functions
+    
+    // Drag functions
     function dragstarted(event, d) {
-      if (!event.active) simulation.alphaTarget(0.3).restart();
-      d.fx = d.x;
-      d.fy = d.y;
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
     }
+    
     function dragged(event, d) {
-      d.fx = event.x;
-      d.fy = event.y;
+        d.fx = event.x;
+        d.fy = event.y;
     }
+    
     function dragended(event, d) {
-      if (!event.active) simulation.alphaTarget(0);
-      d.fx = null;
-      d.fy = null;
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
     }
-  </script>
 """
 
         # Create a more focused prompt that asks only for the D3.js code
@@ -937,6 +956,7 @@ class GraphAgent:
             "2. Setting inline styles on the SVG elements\n\n"
             "For reference, here is an example of D3.js code with CSS handling for a Force-Directed Graph: "
             f"{example_d3_code}\n\n"
+            "Use getDimensions() to get the dimensions of the SVG element as shown in the example code"
             "Output ONLY the <script> element with your visualization code. Do not include DOCTYPE, HTML, head, or body tags."
             "And if the task is simple you can amp it up with effects and animations only if you are confident without errors or else just keep it simple"
         )
