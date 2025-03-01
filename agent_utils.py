@@ -324,7 +324,7 @@ class GraphAgent:
         - Consider node/edge sampling for visualization or complex algorithms
         - If there are relevant variables already in the state data, USE THEM DIRECTLY instead of recomputing
 
-        
+
         Be very precise on the NetworkX algorithm you select to answer this query.
         Think step by step about both correctness AND performance.
 
@@ -596,7 +596,7 @@ class GraphAgent:
                    → For simple, direct queries: Use single comprehensive tool calls
                    → For complex analysis: Break down into logical steps
                    → For uncertain data: Start with exploratory queries, then refine
-                4. Combine results for final answer
+                4. Combine results and formulate a final answer for the query
                 5. if the data is not what you want or it is empty; you are allowed to make new tool calls to replace the data for that particular variable name
 
                 Rules:
@@ -606,7 +606,7 @@ class GraphAgent:
                 → Also dont bother about visulization in the plan. There is another agent for that after this step. But always try to return the data that can help in generating a good visualization.
 
                
-                At the end if you got everything to answer the query, just return the answer in the last step.
+                
 
                 Graph Schema:
                 {schema}
