@@ -589,23 +589,25 @@ class GraphAgent:
         data_preview = create_data_preview(state.get("data", {}))
         
         plan_prompt = """SYSTEM: You are a Graph Analysis Planner. Follow these steps:
-                1. Analyze the user's query for batch processing opportunities
-                2. ALWAYS examine existing data in the state BEFORE making new tool calls  
-                3. Create optimized steps using available tools
-                4. Prefer single comprehensive queries over multiple small ones
-                5. Use aggregation and grouping where possible
-                6. Combine results for final answer
+                ANALYSIS APPROACH:
+                1. First examine the query complexity and data dependencies
+                2. ALWAYS check existing state data before making new tool calls
+                3. Choose the optimal strategy:
+                   → For simple, direct queries: Use single comprehensive tool calls
+                   → For complex analysis: Break down into logical steps
+                   → For uncertain data: Start with exploratory queries, then refine
+                4. Combine results for final answer
+                5. if the data is not what you want or it is empty; you are allowed to make new tool calls to replace the data for that particular variable name
 
                 Rules:
                 → FIRST check if needed data already exists in Current Data at hand
-                → ALL tools have access to the Current Data at hand - no need to re-fetch existing data
-                → Look for ways to handle multiple items in one tool call
-                → Use summary statistics (sums, counts) in queries
+                → ALL tools have access to the Current Data at hand - no need to re-fetch existing da
                 → Retrieve related data in single queries when possible
-                → Handle top N results within the same query
                 → Also dont bother about visulization in the plan. There is another agent for that after this step. But always try to return the data that can help in generating a good visualization.
 
                
+                At the end if you got everything to answer the query, just return the answer in the last step.
+
                 Graph Schema:
                 {schema}
                 Current Data at hand:
@@ -817,10 +819,13 @@ class GraphAgent:
                                 const dims = getDimensions();
                                 return `0 0 ${dims.fullWidth} ${dims.fullHeight}`;
                             });
-                        let { width:aa, height:bb, margin:cc, fullWidth:dd, fullHeight:ee } = getDimensions();
+                        
+                        // Get initial dimensions for setup
+                        const initialDimensions = getDimensions();
+                        
                         // Create main group
                         const g = svg.append("g")
-                            .attr("transform", `translate(${cc.left},${cc.top})`);
+                            .attr("transform", `translate(${initialDimensions.margin.left},${initialDimensions.margin.top})`);
 
                         // Update zoom behavior to use dynamic dimensions
                         const zoom = d3.zoom()
@@ -830,6 +835,10 @@ class GraphAgent:
                             });
 
                         svg.call(zoom);
+                        
+                        // IMPORTANT: DO NOT use width or height as global variables!
+                        // ALWAYS call getDimensions() to get the current dimensions when needed.
+                        // Example: const { width, height } = getDimensions();
                     </script>
         """
 
@@ -847,6 +856,9 @@ class GraphAgent:
                 // The data is already available as a global 'data' variable
                 console.log("Data available:", data);
                 
+                //using the existing getDimensions
+                 {width, height, margin, fullWidth, fullHeight } = getDimensions();
+
                 // Add necessary styles
             const styleSheet = document.createElement("style");
             styleSheet.textContent = `
@@ -984,95 +996,50 @@ class GraphAgent:
             "- g: Main SVG group for adding visualization elements\n"
             "- svg: Main SVG selection with zoom behavior\n\n"
             
-            f"Create an interactive visualization based on this specification: {query}\n\n"
+            "HERE IS THE EXACT CODE THAT'S ALREADY SET UP:\n"
+            "```javascript\n" + 
+            visualization_script.strip() + 
+            "\n```\n\n"
             
-            "VISUALIZATION TYPES AND CONSIDERATIONS:\n"
-            "1. For Bar Charts:\n"
-            "   - Use d3.scaleBand() for x-axis with categorical data\n"
-            "   - Implement proper scales and axes\n"
-            "   - Consider orientation (vertical/horizontal)\n"
-            "   - Add value labels and tooltips\n\n"
+            f"Create an interactive visualization based on this user query: {query}\n\n"
             
-            "2. For Pie/Donut Charts:\n"
-            "   - Use d3.pie() and d3.arc() generators\n"
-            "   - Center in the SVG using width/height\n"
-            "   - Add labels and percentage calculations\n"
-            "   - Consider interactive legends\n\n"
+            "CRITICAL REQUIREMENTS:\n"
+            "1. ALWAYS call getDimensions() at the beginning of EVERY function that uses width/height\n"
+            "2. NEVER use global width/height variables - they don't exist in the template\n"
+            "3. Define simulation BEFORE any functions that use it (like drag functions)\n"
+            "4. Never define data varible; always use the existing 'data' variable and access its different fields\n"
+            "5. You can use new data like names, labels directly depending on the query to generate better visualizations\n"
+            "6. Use the existing 'g' group for adding visualization elements\n"
+            "7. Add visualization-specific styles via JavaScript\n"
+            "8. Add labels or on hover info always depends on the type of visualization\n"
+            "9. ALWAYS handle empty, null, or undefined values in the data:\n"
+            "   - Check if objects exist before accessing their properties\n"
+            "   - Provide default values using || or ternary operators\n"
+            "   - Filter out null/undefined entries from arrays\n"
+            "   - Use optional chaining (?.) when appropriate\n"
+            "   - Ensure scale domains have valid min/max values\n"
+            "   - Add fallbacks for all data-dependent calculations\n"
             
-            "3. For Line/Area Charts:\n"
-            "   - Use d3.line() or d3.area() generators\n"
-            "   - Implement proper scales for both axes\n"
-            "   - Add gridlines and axes\n"
-            "   - Consider data point markers\n\n"
+            "COMMON PATTERNS:\n"
+            "```javascript\n"
+            "// CORRECT - Always get dimensions first in every function\n"
+            "function createForceSimulation(nodes, links) {\n"
+            "  const { width, height } = getDimensions();\n"
+            "  return d3.forceSimulation(nodes)\n"
+            "    .force('center', d3.forceCenter(width / 2, height / 2));\n"
+            "}\n"
+            "\n"
+            "// CORRECT - Create simulation before drag functions\n"
+            "const { width, height } = getDimensions();\n"
+            "const simulation = d3.forceSimulation(nodes);\n"
+            "// Now define drag functions\n"
+            "function dragstarted(event, d) {\n"
+            "  if (!event.active) simulation.alphaTarget(0.3).restart();\n"
+            "}\n"
+            "```\n\n"
             
-            "4. For Network/Force Graphs:\n"
-            "   - Use d3.forceSimulation() for layout\n"
-            "   - Implement node/link structures\n"
-            "   - Add drag behavior and collision detection\n"
-            "   - Consider force parameters based on data size\n\n"
-            
-            "5. For Scatter Plots:\n"
-            "   - Use appropriate scales for both axes\n"
-            "   - Add axis labels and gridlines\n"
-            "   - Consider adding trend lines\n"
-            "   - Implement point sizing and coloring\n\n"
-            
-            "FOCUS ON:\n"
-            "1. Visual Elements:\n"
-            "   - Create clear and intuitive visual representations\n"
-            "   - Implement proper scales and axes where needed\n"
-            "   - Add legends and labels as appropriate\n"
-            "   - Use color scales effectively\n"
-            
-            "2. Interactivity:\n"
-            "   - Add hover effects and tooltips\n"
-            "   - Implement click interactions if relevant\n"
-            "   - Add transitions and animations for updates\n"
-            "   - Consider filtering or selection mechanisms\n"
-            
-            "3. Styling and Layout:\n"
-            "   - Add chart-specific CSS via styleSheet.textContent\n"
-            "   - Implement responsive sizing\n"
-            "   - Use appropriate colors and visual hierarchy\n"
-            "   - Consider accessibility in color choices\n\n"
-            
-            "Data Structure Preview:\n" + 
+            "data variable Preview:\n" + 
             json.dumps(data_preview, indent=2) + "\n\n"
-            
-            "IMPORTANT GUIDELINES:\n"
-            "1. DO NOT recreate the SVG or container - use existing setup\n"
-            "2. DO NOT modify the existing container structure\n"
-            "3. ADD all visualization-specific styles via JavaScript\n"
-            "4. USE the existing 'g' group for adding visualization elements\n"
-            "5. UTILIZE getDimensions() for responsive sizing\n"
-            "6. ENSURE proper cleanup before redrawing\n"
-            "7. IMPLEMENT proper scales based on data ranges\n"
-            "8. ADD appropriate axes and legends as needed\n"
-            "9. Design the visualization based on the data available and the query\n"
-            
-            "Common D3.js Patterns:\n"
-            "1. Scales and Axes:\n"
-            "   ```javascript\n"
-            "   const xScale = d3.scaleLinear().domain([min, max]).range([0, width]);\n"
-            "   const yScale = d3.scaleLinear().domain([min, max]).range([height, 0]);\n"
-            "   const xAxis = d3.axisBottom(xScale);\n"
-            "   const yAxis = d3.axisLeft(yScale);\n"
-            "   ```\n\n"
-            
-            "2. Data Binding:\n"
-            "   ```javascript\n"
-            "   const elements = g.selectAll('.element')\n"
-            "     .data(data)\n"
-            "     .join('g')\n"
-            "     .attr('class', 'element');\n"
-            "   ```\n\n"
-            
-            "3. Transitions:\n"
-            "   ```javascript\n"
-            "   elements.transition()\n"
-            "     .duration(750)\n"
-            "     .attr('property', value);\n"
-            "   ```\n\n"
             
             "Output Requirements:\n"
             "1. Provide ONLY the visualization-specific code within <script> tags\n"
@@ -1116,6 +1083,8 @@ class GraphAgent:
             print(complete_html)
             print("=" * 50)
 
+            with open("generated.html", "w") as file:
+                file.write(complete_html)
             # Encode the HTML and create iframe
             encoded_html = base64.b64encode(complete_html.encode('utf-8')).decode('utf-8')
             data_url = f"data:text/html;base64,{encoded_html}"
