@@ -39,8 +39,7 @@ class GraphState(TypedDict):
     user_query: str  # To track the current query being processed
     data: Annotated[dict[str, Any], add_data]
     RAG_reply: str
-    iframe_html: any
-    # graph_schema: dict[str, Any]
+    Has_Visualization: str
     
 
 class GraphAgent:
@@ -579,7 +578,8 @@ class GraphAgent:
         """RAG Step to generate a plan for the query and execute it to get the results"""
 
         # return{
-        #     "messages": AIMessage(content="Done")
+        #     "messages": AIMessage(content="Done"),
+        #     "RAG_reply": "Done"
         # }
 
         print("\nProcessing Agent State:")
@@ -679,17 +679,12 @@ class GraphAgent:
         print("Visualizer State:")
         pprint(state["messages"], indent=2, width=80)
 
-        # # test code
-        # hmtlfilepath = "./vis.html"
-        # with open(hmtlfilepath, 'r') as file:
-        #     file_content = file.read()
-        # encoded_html = base64.b64encode(file_content.encode('utf-8')).decode('utf-8')
-        # data_url = f"data:text/html;base64,{encoded_html}"
-        # iframe_html = f'<iframe src="{data_url}" width="620" height="420" frameborder="0"></iframe>'
+        # test code
+
 
         # return{
         #     "messages": AIMessage(content="Done"),
-        #     "iframe_html": gr.HTML(value=iframe_html)
+        #     "Has_Visualization": "true"
         # }
         
         # Create a preview for the data in the prompt
@@ -700,6 +695,7 @@ class GraphAgent:
                          RULES:
                         - You can make only one tool call for visualization
                         - Come up with different visualizations based on the data and the query
+                        - If the query answer is in one word or if the preview of the data contains only value like a number or a string, then dont generate a visualization. Just return No Visualization Needed.
                         - Provide clear instructions to the tool on what to generate by considering the data at hand and the query
                         - Example: a bar chart for number of hours played by each user or number users a game has been played by 
                         - Example: Use graph type charts whenever you can based on the data at hand like a games and its users and the node size should be based on some metric"""
@@ -1017,27 +1013,16 @@ class GraphAgent:
             "   - Provide default values using || or ternary operators\n"
             "   - Filter out null/undefined entries from arrays\n"
             "   - Use optional chaining (?.) when appropriate\n"
-            "   - Ensure scale domains have valid min/max values\n"
             "   - Add fallbacks for all data-dependent calculations\n"
             
-            "COMMON PATTERNS:\n"
-            "```javascript\n"
-            "// CORRECT - Always get dimensions first in every function\n"
-            "function createForceSimulation(nodes, links) {\n"
-            "  const { width, height } = getDimensions();\n"
-            "  return d3.forceSimulation(nodes)\n"
-            "    .force('center', d3.forceCenter(width / 2, height / 2));\n"
-            "}\n"
-            "\n"
-            "// CORRECT - Create simulation before drag functions\n"
-            "const { width, height } = getDimensions();\n"
-            "const simulation = d3.forceSimulation(nodes);\n"
-            "// Now define drag functions\n"
-            "function dragstarted(event, d) {\n"
-            "  if (!event.active) simulation.alphaTarget(0.3).restart();\n"
-            "}\n"
-            "```\n\n"
-            
+            """Your visualization code MUST follow this exact sequence:
+            1. Process data and declare all data-derived variables
+            2. Define all scales and utility functions
+            3. ONLY THEN create any simulation or force layout
+            4. Define event handlers (drag, click, etc.)
+            5. Create and append visual elements
+            6. Add update functions (simulation tick, etc.)"""
+
             "data variable Preview:\n" + 
             json.dumps(data_preview, indent=2) + "\n\n"
             
@@ -1083,25 +1068,22 @@ class GraphAgent:
             print(complete_html)
             print("=" * 50)
 
+            # Save the generated HTML to a file
             with open("generated.html", "w") as file:
                 file.write(complete_html)
-            # Encode the HTML and create iframe
-            encoded_html = base64.b64encode(complete_html.encode('utf-8')).decode('utf-8')
-            data_url = f"data:text/html;base64,{encoded_html}"
-            iframe_html = f'<iframe src="{data_url}" width="620" height="420" frameborder="0"></iframe>'
             
             return Command(
                 update={
-                    "iframe_html": gr.HTML(value=iframe_html),
-                    "messages": [ToolMessage("Visualization Done", tool_call_id=tool_call_id)]
+                    "messages": [ToolMessage("Visualization Done", tool_call_id=tool_call_id)],
+                    "Has_Visualization": "true"
                 }
             )
         except Exception as e:
             print(f"Error generating visualization: {str(e)}")
             return Command(
                 update={
-                    "iframe_html": gr.HTML(value="<p>Error generating visualization. Please try again.</p>"),
-                    "messages": [ToolMessage(f"Error generating visualization: {str(e)}", tool_call_id=tool_call_id)]
+                    "messages": [ToolMessage(f"Error generating visualization: {str(e)}", tool_call_id=tool_call_id)],
+                    "Has_Visualization": "false"
                 }
             )
 
@@ -1176,7 +1158,7 @@ class GraphAgent:
             "RAG_reply": "",
             "user_query": query,
             "data": {},  # Initialize empty data dictionary
-            "iframe_html": "",  # Initialize empty iframe
+            "Has_Visualization": "false"
         }
         
         # Use invoke() instead of stream() to get final state directly
@@ -1187,9 +1169,9 @@ class GraphAgent:
         
         # Return structured response
         return {
-            "html_code": final_state["iframe_html"],
             "reply": final_state["messages"][-1].content,
-            "rag_reply": final_state["RAG_reply"]  # Include the RAG_reply in the response
+            "rag_reply": final_state["RAG_reply"],  # Include the RAG_reply in the response
+            "Has_Visualization": final_state["Has_Visualization"]
         }
         
     def save_state_to_json(self, state, query):
@@ -1236,10 +1218,6 @@ class GraphAgent:
         # Convert data to a serializable format using existing method
         if "data" in state_copy:
             state_copy["data"] = self.create_serializable_data(state_copy["data"])
-            
-        # Remove any potentially problematic fields
-        if "iframe_html" in state_copy and isinstance(state_copy["iframe_html"], object) and not isinstance(state_copy["iframe_html"], (str, int, float, bool, list, dict, type(None))):
-            state_copy["iframe_html"] = str(state_copy["iframe_html"])
             
         return state_copy
         

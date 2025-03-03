@@ -1,7 +1,7 @@
 total number of users in the graph
 common users between Team Fortress 2 and  Dota 2
 can u show the distribution of top 5 most played games by users and also by hours
-Find the  top 10 users who played a lot  and which games they have played is common most by hours
+Find the  top 10 users who played a lot  and which games they have played by hours
 top 5 users of top 3 games
 Users who have played the most influential game
 Find 2nd and 4th Most influential game in the graph and its number of users who played both of them
@@ -10,21 +10,26 @@ distribution of top 10 users by their playtime and also by their number of games
 Which users have the most similar gaming preferences
 Which users have the most diverse gaming libraries?
 Identifies users who bridge different gaming communities
+Which games serve as "bridges" between different gaming communities?
+What are the most popular games with over 100 hours of average playtime
+Find games that have a similar player base to Skyrim
+Create a heatmap of user-game interactions by playtime for top 10 users
+Find hardcore gamers (users with multiple games played over 200 hours each)
+Analyze the relationship between playtime intensity and gaming diversity, then visualize the clusters
 
-Here are some examples of users with the most similar gaming preferences:
-- User "Users/103559489" and User "Users/103373255" have a similarity score of 1.0.
-- User "Users/103559489" and User "Users/117036229" also have a similarity score of 1.0.
-
+If we wanted to pair each user with their most distinctive game, what would those pairings be?
 
 
 do both data const and also individual key constas - NOT NEEDED
 - one tool call only for visualizing the graph but can be combined graphs 
 or multiple plots and toolcalls
-new claude model
 Make aql be aware of the data at hand and give it access to the state variables to use it in the code
-Instead of iframe; why not genrate a html file and open it in a new tab for visualization
 
 
+        IMPORTANT:
+        - Only for communities queries as the data is too big; you can limit to only top communities and also limit the number of nodes inside each communities
+        -For queries related to communities think more on how to generate data that can help in generating a good visualization
+        
 
 
 
