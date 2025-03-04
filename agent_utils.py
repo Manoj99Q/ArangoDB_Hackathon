@@ -588,16 +588,17 @@ class GraphAgent:
         # Create a preview for the data in the prompt
         data_preview = create_data_preview(state.get("data", {}))
         
-        plan_prompt = """SYSTEM: You are a Graph Analysis Planner. Follow these steps:
+        plan_prompt = """SYSTEM: You are a Graph Analysis Agent. Follow these steps:
                 ANALYSIS APPROACH:
-                1. First examine the query complexity and data dependencies
-                2. ALWAYS check existing state data before making new tool calls
-                3. Choose the optimal strategy:
+                1. You can enhance the query to get more related data which can help in answering the user query better
+                2. First examine the query complexity and data dependencies
+                3. ALWAYS check existing state data before making new tool calls
+                4. Choose the optimal strategy:
                    → For simple, direct queries: Use single comprehensive tool calls
                    → For complex analysis: Break down into logical steps
                    → For uncertain data: Start with exploratory queries, then refine
-                4. Combine results and formulate a final answer for the query
-                5. if the data is not what you want or it is empty; you are allowed to make new tool calls to replace the data for that particular variable name
+                5. Combine results and formulate a final answer for the user query like a natural language answer without mentioning the data variables but only the values if needed
+                6. if the data is not what you want or it is empty; you are allowed to make new tool calls to replace the data for that particular variable name
 
                 Rules:
                 → FIRST check if needed data already exists in Current Data at hand
@@ -697,8 +698,8 @@ class GraphAgent:
                         - Come up with different visualizations based on the data and the query
                         - If the query answer is in one word or if the preview of the data contains only value like a number or a string, then dont generate a visualization. Just return No Visualization Needed.
                         - Provide clear instructions to the tool on what to generate by considering the data at hand and the query
-                        - Example: a bar chart for number of hours played by each user or number users a game has been played by 
-                        - Example: Use graph type charts whenever you can based on the data at hand like a games and its users and the node size should be based on some metric"""
+                        - Example: a bar chart or pie chart for number of hours played by each user or number users a game has been played by 
+                        - Example: Use graph type or network type charts whenever you can based on the data at hand like a games and its users and the node size should be based on some metric"""
         
         # Don't embed JSON directly in the prompt to avoid template variable confusion
         user_prompt = f"Visualize for: {state['user_query']}"
@@ -1001,7 +1002,7 @@ class GraphAgent:
             
             "CRITICAL REQUIREMENTS:\n"
             "1. ALWAYS call getDimensions() at the beginning of EVERY function that uses width/height\n"
-            "2. NEVER use global width/height variables - they don't exist in the template\n"
+            "2. NEVER use global width/height variables - they don't exist in the template- always use getDimensions() to get width or heigth and others\n"
             "3. Define simulation BEFORE any functions that use it (like drag functions)\n"
             "4. Never define data varible; always use the existing 'data' variable and access its different fields\n"
             "5. You can use new data like names, labels directly depending on the query to generate better visualizations\n"
