@@ -202,8 +202,7 @@ class GraphAgent:
         reply = "Query executed successfully and updated the state with the result"
  
         
-        print("print AQL tool result")
-        print(result)
+
         
         return Command(
             update={
@@ -230,8 +229,8 @@ class GraphAgent:
         data_preview = {}
         if state and "data" in state:
             data_preview = create_data_preview(state["data"])
-            print("State data available:")
-            print(json.dumps(data_preview, indent=2))
+            # print("State data available:")
+            # print(json.dumps(data_preview, indent=2))
         
         # Create parts of the prompt separately to handle the braces properly
         example_code = '''
@@ -393,9 +392,9 @@ class GraphAgent:
                 }
             )
 
-        print('-'*10)
-        print(f"FINAL_RESULT: {FINAL_RESULT}")
-        print('-'*10)
+        # print('-'*10)
+        # print(f"FINAL_RESULT: {FINAL_RESULT}")
+        # print('-'*10)
 
         return Command(
             update={
@@ -593,7 +592,7 @@ class GraphAgent:
         # }
 
         print("\nProcessing Agent State:")
-        pprint(state["messages"], indent=2, width=80)
+        # pprint(state["messages"], indent=2, width=80)
 
         # Create a preview for the data in the prompt
         data_preview = create_data_preview(state.get("data", {}))
@@ -634,9 +633,9 @@ class GraphAgent:
             data_preview=json.dumps(data_preview, indent=2),
             user_query=state["user_query"]
         )
-        print("\n==== RAG PROMPT ====")
-        print(filled_prompt)
-        print("==== END RAG PROMPT ====\n")
+        # print("\n==== RAG PROMPT ====")
+        # print(filled_prompt)
+        # print("==== END RAG PROMPT ====\n")
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", plan_prompt),
@@ -668,7 +667,7 @@ class GraphAgent:
         """Intermediate node that extracts the last message from RAG and updates the RAG_reply state variable."""
         
         print("\nRAG_Summarizer State:")
-        pprint(state["messages"], indent=2, width=80)
+        # pprint(state["messages"], indent=2, width=80)
         
         # Extract the last message from the RAG node
         messages = state["messages"]
@@ -728,11 +727,11 @@ class GraphAgent:
         user_prompt = f"Visualize or format the data for: {state['user_query']}"
         
         # Log the prompt for verification
-        print("\n==== VISUALIZER PROMPT ====")
-        print("SYSTEM: " + system_prompt)
-        print("\nUSER: " + user_prompt)
-        print("DATA: " + data_preview_json)
-        print("==== END VISUALIZER PROMPT ====\n")
+        # print("\n==== VISUALIZER PROMPT ====")
+        # print("SYSTEM: " + system_prompt)
+        # print("\nUSER: " + user_prompt)
+        # print("DATA: " + data_preview_json)
+        # print("==== END VISUALIZER PROMPT ====\n")
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
@@ -1040,7 +1039,7 @@ class GraphAgent:
             "   - Add fallbacks for all data-dependent calculations\n"
             "10. Never smaple or limit the data; use all the data available"
 
-            
+
             """Your visualization code MUST follow this exact sequence:
             1. Process data and declare all data-derived variables
             2. Define all scales and utility functions
@@ -1062,9 +1061,9 @@ class GraphAgent:
         )
         
         # Log the prompt for verification
-        print("\n==== VISUALIZATION GENERATION PROMPT ====")
-        print(visualization_prompt)
-        print("==== END VISUALIZATION GENERATION PROMPT ====\n")
+        # print("\n==== VISUALIZATION GENERATION PROMPT ====")
+        # print(visualization_prompt)
+        # print("==== END VISUALIZATION GENERATION PROMPT ====\n")
         
         try:
             print("Generating visualization code...")
@@ -1090,9 +1089,9 @@ class GraphAgent:
             
             # Print the generated code for debugging
             print("\nGenerated Visualization Code:")
-            print("=" * 50)
-            print(complete_html)
-            print("=" * 50)
+            # print("=" * 50)
+            # print(complete_html)
+            # print("=" * 50)
 
             # Save the generated HTML to a file
             with open("generated.html", "w") as file:

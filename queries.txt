@@ -3,10 +3,11 @@ common users between Team Fortress 2 and  Dota 2
 give some random users and their games
 average playtime of users; average number of games played by users
 can u show the distribution of top 5 most played games by users and also by hours
-Find the  top 10 users who played a lot  and which games they have played by hours
 top 5 users of top 3 games
+pie chart 
+Find the  top 10 users who played a lot  and which games they have played by hours
 Users who have played the most influential game
-Find 2nd and 4th Most influential game in the graph and its number of users who played both of them
+Find 2nd and 4th Most influential game in the graph and the users who played them
 the  top 3 user who played the most number of games and the games they played
 distribution of top 10 users by their playtime and also by their number of games
 Which users have the most similar gaming preferences
@@ -19,13 +20,16 @@ Create a heatmap of user-game interactions by playtime for top 10 users
 Find hardcore gamers (users with multiple games played over 200 hours each)
 Analyze the relationship between playtime intensity and gaming diversity, then visualize the clusters
 
+
+Identify and visualize the core-periphery structure of the gaming network
+
+Business Intelligence:
+Which users are potential micro-influencers based on their central position in gaming communities?
+What games should we recommend to retain users who only play a single game?
 If we wanted to pair each user with their most distinctive game, what would those pairings be?
 
 
-do both data const and also individual key constas - NOT NEEDED
-- one tool call only for visualizing the graph but can be combined graphs 
-or multiple plots and toolcalls
-Make aql be aware of the data at hand and give it access to the state variables to use it in the code
+
 
 
         IMPORTANT:

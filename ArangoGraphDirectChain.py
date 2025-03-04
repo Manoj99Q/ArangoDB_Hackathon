@@ -246,10 +246,10 @@ class ArangoGraphDirectChain(Chain):
         }
         # Format the prompt with all values
         complete_prompt = self.aql_generation_chain.prompt.format(**prompt_values)
-        print("Complete AQL Generation Prompt with all values:")
-        print("-" * 80)
-        print(complete_prompt)
-        print("-" * 80)
+        # print("Complete AQL Generation Prompt with all values:")
+        # print("-" * 80)
+        # print(complete_prompt)
+        # print("-" * 80)
         #########################
 
         #########################
