@@ -513,8 +513,18 @@ class GraphAgent:
             """
             return self.generate_dynamic_graph_html(query,tool_call_id=tool_call_id,state=state)
         
+        @tool
+        def format_limited_data_reply(tool_call_id: Annotated[str, InjectedToolCallId], 
+                                     state: Annotated[dict, InjectedState]):
+            """Format a text-based reply for limited data sets (less than ~10 values).
+            This tool should be used when the data is too small to warrant a full visualization.
+            It formats the data into a clear, readable text response based on the user's query.
+            """
+            return self.format_small_data_reply(tool_call_id=tool_call_id, state=state)
+        
         return [
-            graph_vis_Wrapper
+            graph_vis_Wrapper,
+            format_limited_data_reply
             # Add other visualization tools as needed
         ]
 
@@ -692,17 +702,30 @@ class GraphAgent:
         data_preview = create_data_preview(state.get("data", {}))
         data_preview_json = json.dumps(data_preview, indent=2)
         
-        system_prompt = """You are a visualization expert. Create visual representations of the data. 
+        system_prompt = """You are a visualization expert. Create visual representations of the data or format text replies for appropriate scenarios. 
                          RULES:
-                        - You can make only one tool call for visualization
-                        - Come up with different visualizations based on the data and the query
-                        - If the query answer is in one word or if the preview of the data contains only value like a number or a string, then dont generate a visualization. Just return No Visualization Needed.
-                        - Provide clear instructions to the tool on what to generate by considering the data at hand and the query
-                        - Example: a bar chart or pie chart for number of hours played by each user or number users a game has been played by 
-                        - Example: Use graph type or network type charts whenever you can based on the data at hand like a games and its users and the node size should be based on some metric"""
+                        - You can make only one tool call per response
+                        - Choose the right tool based on the data complexity:
+                          
+                          1. Use format_limited_data_reply ONLY for extremely simple data sets:
+                             - Single values or statistics (e.g., "42 users")
+                             - Simple lists with under 10 items (e.g., "Top 5 games")
+                             - Basic counts with no relationships (e.g., "User X played 3 games")
+                          
+                          2. Use graph_vis_Wrapper for more complex data with:
+                             - Relationships between entities (e.g., games and their players)
+                             - Hierarchical or nested structures
+                             - Any data with more than 10 values or items
+                             - Data that benefits from visual patterns
+                        
+                        - If the query answer is a single word or the data is just a simple value like a number or string, don't generate any visualization. Just return "No Visualization Needed".
+                        
+                        - For graph_vis_Wrapper, provide clear instructions on what visualization type to generate. Always prefer networkx visualization whenever possible unless the user specifies otherwise.
+                        
+                        - IMPORTANT: NEVER use format_limited_data_reply for relationship data like games and their players - this always requires visualization"""
         
         # Don't embed JSON directly in the prompt to avoid template variable confusion
-        user_prompt = f"Visualize for: {state['user_query']}"
+        user_prompt = f"Visualize or format the data for: {state['user_query']}"
         
         # Log the prompt for verification
         print("\n==== VISUALIZER PROMPT ====")
@@ -1015,6 +1038,8 @@ class GraphAgent:
             "   - Filter out null/undefined entries from arrays\n"
             "   - Use optional chaining (?.) when appropriate\n"
             "   - Add fallbacks for all data-dependent calculations\n"
+            "10. Never smaple or limit the data; use all the data available"
+
             
             """Your visualization code MUST follow this exact sequence:
             1. Process data and declare all data-derived variables
@@ -1241,5 +1266,87 @@ class GraphAgent:
             result["additional_kwargs"] = self.create_serializable_data(message.additional_kwargs)
             
         return result
+
+    def format_small_data_reply(self, tool_call_id: str, state: GraphState):
+        """Format a simple text response for very basic data sets
+        
+        This method handles only very basic data - a few items with simple values.
+        It should NOT be used for complex structured data like games with their players,
+        which should use visualization instead.
+        
+        Examples of appropriate data:
+        - Simple counts: "5 users played Game X"
+        - Basic lists: "Top 3 games: Game A, Game B, Game C"
+        - Single statistics: "Average playtime is 45 minutes"
+        
+        The output is purely text-based with no HTML or visualization code.
+        """
+        # Get the data and user query from the state
+        data = state.get("data", {})
+        user_query = state.get("user_query", "")
+        
+        # Create prompt for formatting the reply - directly use the data without any processing
+        format_prompt = (
+            "Based on the following data and user query, format a clear, plain text response. "
+            "This should ONLY be used for extremely simple data sets with few items and single values. "
+            "Your task is to create a readable, direct text response.\n\n"
+            
+            f"User Query: {user_query}\n\n"
+            
+            "Data (use directly):\n" + 
+            str(data) + "\n\n"
+            
+            "IMPORTANT REQUIREMENTS:\n"
+            "1. DO NOT generate any HTML, visualization code, or markdown formatting\n"
+            "2. DO NOT attempt to format complex data - if the data contains nested structures like games with players, "
+            "   respond with 'This data is too complex for text formatting and requires visualization'\n"
+            "3. Provide ONLY a plain text response with simple formatting like bullet points or numbers\n"
+            "4. Use standard text characters only - no special HTML entities or symbols\n"
+            "5. If the data is a single value or very simple count, present it in a straightforward sentence\n"
+            "6. For lists of items (up to ~10), use simple numbered or bulleted lists using standard characters\n"
+            
+            "Example appropriate responses:\n"
+            "- The top 3 games are: 1) Fortnite, 2) Minecraft, 3) Call of Duty\n"
+            "- Total users: 42\n"
+            "- User 123 has played 5 games in the past week\n"
+            
+            "Your response will be displayed directly to the user without any further processing."
+        )
+        
+        try:
+            print("Generating plain text reply for simple data...")
+            print(f"Data being used directly: {str(data)[:200]}..." if len(str(data)) > 200 else f"Data being used directly: {str(data)}")
+            
+            # Get response from Claude
+            response = self.claude_llm.invoke(format_prompt)
+            formatted_reply = response.content
+            
+            # Check if the response indicates the data is too complex
+            if "too complex" in formatted_reply.lower():
+                return Command(
+                    update={
+                        "messages": [ToolMessage("Data is too complex for text formatting, please use visualization instead.", tool_call_id=tool_call_id)],
+                        "Has_Visualization": "false"
+                    }
+                )
+            
+            # Update the RAG_reply in the state
+            return Command(
+                update={
+                    "messages": [ToolMessage("Text reply formatted successfully.", tool_call_id=tool_call_id)],
+                    "RAG_reply": formatted_reply,
+                    "Has_Visualization": "false"  # No visualization needed for this type of reply
+                }
+            )
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Command(
+                update={
+                    "messages": [ToolMessage(f"Error formatting reply: {str(e)}", tool_call_id=tool_call_id)],
+                    "Has_Visualization": "false"
+                }
+            )
 
  

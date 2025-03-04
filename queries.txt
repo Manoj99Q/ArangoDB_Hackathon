@@ -1,5 +1,7 @@
 total number of users in the graph
 common users between Team Fortress 2 and  Dota 2
+give some random users and their games
+average playtime of users; average number of games played by users
 can u show the distribution of top 5 most played games by users and also by hours
 Find the  top 10 users who played a lot  and which games they have played by hours
 top 5 users of top 3 games
