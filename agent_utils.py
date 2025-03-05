@@ -1043,10 +1043,11 @@ class GraphAgent:
             """Your visualization code MUST follow this exact sequence:
             1. Process data and declare all data-derived variables
             2. Define all scales and utility functions
-            3. ONLY THEN create any simulation or force layout
-            4. Define event handlers (drag, click, etc.)
-            5. Create and append visual elements
-            6. Add update functions (simulation tick, etc.)"""
+            3. Then initialze varibales using the scale and utility functions required for the next steps
+            4. ONLY THEN create any simulation or force layout
+            5. Define event handlers (drag, click, etc.)
+            6. Create and append visual elements
+            7. Add update functions (simulation tick, etc.)"""
 
             "data variable Preview:\n" + 
             json.dumps(data_preview, indent=2) + "\n\n"

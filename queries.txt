@@ -19,8 +19,8 @@ Find games that have a similar player base to Skyrim
 Create a heatmap of user-game interactions by playtime for top 10 users
 Find hardcore gamers (users with multiple games played over 200 hours each)
 Analyze the relationship between playtime intensity and gaming diversity, then visualize the clusters
-
-
+Create a comparative bubble chart of the top 10 games by player count versus average playtime
+Visualize the ego network of the most played game
 Identify and visualize the core-periphery structure of the gaming network
 
 Business Intelligence:
