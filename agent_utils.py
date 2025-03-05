@@ -260,29 +260,104 @@ class GraphAgent:
                 'source': 'Used existing community data from state'
             }
             
-           ### EXAMPLE 2: Basic Community Analysis ###
+           ### EXAMPLE 2: An community detection and analysis example ###
             import networkx as nx
             from collections import Counter
-            
+
             # Use Label Propagation for community detection
             communities = nx.community.label_propagation_communities(G_adb)
             communities = list(communities)
-            
+
+            # Get game names for all game nodes
+            game_names = {}
+            games_query = "FOR g IN Games RETURN {id: g._id, name: g.GameName}"
+            for game in G_adb.query(games_query):
+                game_names[game['id']] = game.get('name', 'Unknown Game')
+
             # Analyze all communities
             community_stats = []
             for idx, community in enumerate(communities):
+                # Split nodes into Users and Games
+                user_nodes = [node for node in community if node.startswith('Users/')]
+                
+                # For games, get both ID and name
+                game_nodes = []
+                for node in community:
+                    if node.startswith('Games/'):
+                        game_nodes.append({
+                            'id': node,
+                            'name': game_names.get(node, 'Unknown Game')
+                        })
+                
                 # Count node types (Users, Games, etc.)
                 node_types = Counter(node.split('/')[0] for node in community)
                 
                 community_stats.append({
                     'community_id': idx,
+                    'users': user_nodes, # ids of user nodes
+                    'games': game_nodes, # ids and names of game nodes
                     'size': len(community),
+                    'number_of_users': len(user_nodes),
+                    'number_of_games': len(game_nodes),
                     'composition': dict(node_types)
                 })
-            
+
+            print("Commity Stats Done")
+            # Create a mapping of users to their communities
+            user_community_map = {}
+            for comm_idx, stats in enumerate(community_stats):
+                for user_id in stats['users']:
+                    user_community_map[user_id] = comm_idx
+
+            # Make a single AQL query to get all play relationships
+            plays_query = """
+            FOR p IN plays
+                RETURN {game: p._to, user: p._from}
+            """
+            all_plays = list(G_adb.query(plays_query))
+
+            print("AQL query done")
+            # Create a mapping of games to their users
+            game_to_users = {}
+            for play in all_plays:
+                game_id = play['game']
+                user_id = play['user']
+                
+                if game_id not in game_to_users:
+                    game_to_users[game_id] = []
+                
+                game_to_users[game_id].append(user_id)
+
+            # Identify bridge games - games that connect users from different communities
+            bridge_games = []
+            for game_id, users in game_to_users.items():
+                if game_id not in game_names:
+                    continue
+                    
+                game_name = game_names[game_id]
+                
+                # Get the communities of these users
+                user_communities = set()
+                for user_id in users:
+                    if user_id in user_community_map:
+                        user_communities.add(user_community_map[user_id])
+                
+                # If the game connects multiple communities, it's a bridge
+                if len(user_communities) > 1:
+                    bridge_games.append({
+                        'game_id': game_id,
+                        'game_name': game_name,
+                        'connected_communities': list(user_communities),
+                        'bridge_strength': len(user_communities),
+                        'player_count': len(users)
+                    })
+            # Sort bridge games by bridge strength (number of communities connected)
+            bridge_games.sort(key=lambda x: x['bridge_strength'], reverse=True)
+
             FINAL_RESULT = {
                 'num_communities': len(communities),
-                'all_communities': sorted(community_stats, key=lambda x: x['size'], reverse=True)
+                'all_communities': sorted(community_stats, key=lambda x: x['size'], reverse=True),
+                "bridge_games": bridge_games
             }
             '''
         
@@ -476,6 +551,7 @@ class GraphAgent:
                            state: Annotated[dict, InjectedState] = None):
             """Analyze graph structure and patterns using NetworkX algorithms.
                 Best for:
+                - PageRank Algorithm
                 - Finding shortest paths
                 - Calculating centrality
                 - Detecting communities

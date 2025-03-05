@@ -22,6 +22,7 @@ Analyze the relationship between playtime intensity and gaming diversity, then v
 Create a comparative bubble chart of the top 10 games by player count versus average playtime
 Visualize the ego network of the most played game
 Identify and visualize the core-periphery structure of the gaming network
+Find the statistical correlation between number of games played and average playtime per game
 
 Business Intelligence:
 Which users are potential micro-influencers based on their central position in gaming communities?

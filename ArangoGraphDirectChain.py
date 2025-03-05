@@ -335,13 +335,15 @@ class ArangoGraphDirectChain(Chain):
             """
             raise ValueError(m)
 
-        _run_manager.on_text("AQL Result:", end="\n", verbose=self.verbose)
-        _run_manager.on_text(
-            str(aql_result), color="green", end="\n", verbose=self.verbose
-        )
+        # _run_manager.on_text("AQL Result:", end="\n", verbose=self.verbose)
+        # _run_manager.on_text(
+        #     str(aql_result), color="green", end="\n", verbose=self.verbose
+        # )
 
         # Skip the QA chain step - don't interpret results with natural language
         
+
+        _run_manager.on_text("AQL Result Successfully Obtained:", end="\n", verbose=self.verbose)
         # Prepare result dictionary
         result = {self.output_key: "Query executed successfully"}  # Simple success message
 
