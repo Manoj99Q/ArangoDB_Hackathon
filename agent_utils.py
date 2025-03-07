@@ -72,7 +72,7 @@ class GraphAgent:
         display(Image(self.agent.get_graph(xray=True).draw_mermaid_png()))
 
 
-    def text_to_aql_to_text(self, query: str, tool_call_id: str, var_name: str, state):
+    def text_to_aql(self, query: str, tool_call_id: str, var_name: str, state):
         """This tool is available to invoke the
         ArangoGraphQAChain object, which enables you to
         translate a Natural Language Query into AQL, execute
@@ -232,7 +232,7 @@ class GraphAgent:
             # print("State data available:")
             # print(json.dumps(data_preview, indent=2))
         
-        # Create parts of the prompt separately to handle the braces properly
+        
         example_code = '''
             ### EXAMPLE 1: Using existing state data ###
             import networkx as nx
@@ -540,7 +540,7 @@ class GraphAgent:
             Only pass natural language detailed instructions on what to do. Do not pass the query directly.
             """
             try:
-                return self.text_to_aql_to_text(query, tool_call_id=tool_call_id, var_name=name, state=state)
+                return self.text_to_aql(query, tool_call_id=tool_call_id, var_name=name, state=state)
             except Exception as e:
                 return f"Error: {e}"
             
@@ -672,6 +672,9 @@ class GraphAgent:
 
         # Create a preview for the data in the prompt
         data_preview = create_data_preview(state.get("data", {}))
+
+        print("\nData Preview:")
+        pprint(data_preview, indent=2, width=80)
         
         plan_prompt = """SYSTEM: You are a Graph Analysis Agent. Follow these steps:
                 ANALYSIS APPROACH:
@@ -795,7 +798,7 @@ class GraphAgent:
                         
                         - If the query answer is a single word or the data is just a simple value like a number or string, don't generate any visualization. Just return "No Visualization Needed".
                         
-                        - For graph_vis_Wrapper, provide clear instructions on what visualization type to generate. Always prefer networkx visualization whenever possible unless the user specifies otherwise.
+                        - For graph_vis_Wrapper, provide clear instructions on what visualization type to generate. Prefer networkx visualization whenever possible unless the user specifies otherwise or if the query query is not related to graph visualization.
                         
                         - IMPORTANT: NEVER use format_limited_data_reply for relationship data like games and their players - this always requires visualization"""
         
@@ -1113,8 +1116,8 @@ class GraphAgent:
             "   - Filter out null/undefined entries from arrays\n"
             "   - Use optional chaining (?.) when appropriate\n"
             "   - Add fallbacks for all data-dependent calculations\n"
-            "10. Never smaple or limit the data; use all the data available"
-
+            "10. Never sample or limit the data; use all the data available"
+            "11. IMPORTANT: Create UNBOUNDED visualizations - in any force simulation or node positioning logic, DO NOT clamp or constrain positions to the visible area. Let objects move freely without boundaries\n"
 
             """Your visualization code MUST follow this exact sequence:
             1. Process data and declare all data-derived variables
@@ -1353,7 +1356,7 @@ class GraphAgent:
         Examples of appropriate data:
         - Simple counts: "5 users played Game X"
         - Basic lists: "Top 3 games: Game A, Game B, Game C"
-        - Single statistics: "Average playtime is 45 minutes"
+        - Single statistics: "Average playtime is 45 hours"
         
         The output is purely text-based with no HTML or visualization code.
         """
@@ -1381,10 +1384,13 @@ class GraphAgent:
             "5. If the data is a single value or very simple count, present it in a straightforward sentence\n"
             "6. For lists of items (up to ~10), use simple numbered or bulleted lists using standard characters\n"
             
+            
             "Example appropriate responses:\n"
             "- The top 3 games are: 1) Fortnite, 2) Minecraft, 3) Call of Duty\n"
             "- Total users: 42\n"
             "- User 123 has played 5 games in the past week\n"
+
+            "Current Response: " +str(state.get("RAG_reply", "")) +  "\n\n" 
             
             "Your response will be displayed directly to the user without any further processing."
         )

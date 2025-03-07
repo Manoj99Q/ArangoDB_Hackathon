@@ -5,6 +5,8 @@
 # Data files
 Data/
 
+#Video files
+Videos/
 
 # Python and Jupyter
 __pycache__/
